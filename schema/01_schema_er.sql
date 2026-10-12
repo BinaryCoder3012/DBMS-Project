@@ -89,3 +89,87 @@ CREATE TABLE ExternalCall (
   FOREIGN KEY (agency_id) REFERENCES FundingAgency(agency_id) ON DELETE CASCADE
 );
 
+-- ── Proposal ──────────────────────────────────────────────────
+-- ER: Strong entity. Many-to-one with User (PI).
+-- Status ENUM models the proposal lifecycle state machine.
+-- Cardinality: User(PI) ||—< Proposal
+CREATE TABLE Proposal (
+  proposal_id              INT            NOT NULL AUTO_INCREMENT,
+  title                    VARCHAR(300)   NOT NULL,
+  abstract                 TEXT,
+  total_budget_requested   DECIMAL(15,2)  NOT NULL,
+  duration_months          TINYINT        NOT NULL,
+  submission_date          DATE,
+  status                   ENUM('Draft','Submitted','Under Review','Approved','Rejected')
+                           NOT NULL DEFAULT 'Draft',
+  eligibility_check_passed BOOLEAN        DEFAULT FALSE,
+  pi_id                    INT            NOT NULL,
+  PRIMARY KEY (proposal_id),
+  FOREIGN KEY (pi_id) REFERENCES User(user_id) ON DELETE RESTRICT,
+  CONSTRAINT chk_proposal_budget   CHECK (total_budget_requested > 0),
+  CONSTRAINT chk_proposal_duration CHECK (duration_months > 0)
+);
+
+-- ── Grant_ ────────────────────────────────────────────────────
+-- ER: Strong entity. One-to-one with Proposal (approved proposals
+-- become grants). One-to-many with Project.
+-- Note: named Grant_ because GRANT is a reserved SQL keyword.
+CREATE TABLE Grant_ (
+  grant_id             INT            NOT NULL AUTO_INCREMENT,
+  grant_title          VARCHAR(300)   NOT NULL,
+  total_amount_awarded DECIMAL(15,2)  NOT NULL,
+  start_date           DATE           NOT NULL,
+  end_date             DATE           NOT NULL,
+  status               ENUM('Active','Closed','Suspended') NOT NULL DEFAULT 'Active',
+  funding_agency       VARCHAR(200),
+  agency_contact_info  VARCHAR(300),
+  reporting_frequency  ENUM('Monthly','Quarterly','Biannual','Annual'),
+  proposal_id          INT,
+  PRIMARY KEY (grant_id),
+  UNIQUE KEY uq_grant_proposal (proposal_id),            -- makes "becomes" 1:1 (NULLs allowed)
+  FOREIGN KEY (proposal_id) REFERENCES Proposal(proposal_id) ON DELETE SET NULL,
+  CONSTRAINT chk_grant_dates  CHECK (end_date > start_date),
+  CONSTRAINT chk_grant_amount CHECK (total_amount_awarded > 0)
+);
+
+-- ── Project ───────────────────────────────────────────────────
+-- ER: Strong entity. Central hub entity connected to:
+--     Grant_ (funding), Department (ownership), User (PI),
+--     BudgetHead, Milestone, Expense, ResearchOutput (children).
+CREATE TABLE Project (
+  project_id      INT           NOT NULL AUTO_INCREMENT,
+  project_title   VARCHAR(300)  NOT NULL,
+  description     TEXT,
+  start_date      DATE          NOT NULL,
+  end_date        DATE          NOT NULL,
+  status          ENUM('Planning','Active','On Hold','Completed','Closed')
+                  NOT NULL DEFAULT 'Planning',
+  current_balance DECIMAL(15,2) NOT NULL DEFAULT 0,
+  department_id   INT,
+  grant_id        INT,
+  pi_id           INT           NOT NULL,
+  PRIMARY KEY (project_id),
+  FOREIGN KEY (department_id) REFERENCES Department(dept_id) ON DELETE SET NULL,
+  FOREIGN KEY (grant_id)      REFERENCES Grant_(grant_id)    ON DELETE SET NULL,
+  FOREIGN KEY (pi_id)         REFERENCES User(user_id)       ON DELETE RESTRICT,
+  CONSTRAINT chk_project_dates   CHECK (end_date > start_date),
+  CONSTRAINT chk_project_balance CHECK (current_balance >= 0)
+);
+
+-- ── BudgetHead ────────────────────────────────────────────────
+-- ER: Weak entity dependent on Project.
+-- remaining_balance is a GENERATED (computed) column — avoids anomalies.
+-- Cardinality: Project ||—< BudgetHead (cascade delete)
+CREATE TABLE BudgetHead (
+  budgethead_id     INT           NOT NULL AUTO_INCREMENT,
+  project_id        INT           NOT NULL,
+  category          ENUM('Equipment','Travel','Manpower','Consumables','Other') NOT NULL,
+  allocated_amount  DECIMAL(15,2) NOT NULL,
+  spent_amount      DECIMAL(15,2) NOT NULL DEFAULT 0,
+  remaining_balance DECIMAL(15,2) GENERATED ALWAYS AS (allocated_amount - spent_amount) STORED,
+  fiscal_year       YEAR,
+  PRIMARY KEY (budgethead_id),
+  FOREIGN KEY (project_id) REFERENCES Project(project_id) ON DELETE CASCADE,
+  CONSTRAINT chk_budget_amounts CHECK (allocated_amount > 0 AND spent_amount >= 0)
+);
+
