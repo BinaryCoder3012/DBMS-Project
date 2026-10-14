@@ -240,3 +240,98 @@ CREATE TABLE Notification (
   FOREIGN KEY (user_id) REFERENCES User(user_id) ON DELETE CASCADE
 );
 
+-- ════════════════════════════════════════════════════════════
+--  WEAK ENTITIES (partial key + owner entity)
+-- ════════════════════════════════════════════════════════════
+
+-- ── Dependent ────────────────────────────────────────────────
+-- ER: Weak entity. PK = (user_id, dependent_name).
+-- Existence depends on parent User (cascade delete).
+CREATE TABLE Dependent (
+  user_id        INT          NOT NULL,
+  dependent_name VARCHAR(120) NOT NULL,
+  relationship   ENUM('Spouse','Child','Parent') NOT NULL,
+  date_of_birth  DATE,
+  phone          VARCHAR(20),
+  PRIMARY KEY (user_id, dependent_name),
+  FOREIGN KEY (user_id) REFERENCES User(user_id) ON DELETE CASCADE
+);
+
+-- ── PublicationAuthor ─────────────────────────────────────────
+-- ER: Associative (bridge) entity for M:N between ResearchOutput and User.
+-- author_position captures first/second/corresponding author ordering.
+CREATE TABLE PublicationAuthor (
+  output_id                INT          NOT NULL,
+  user_id                  INT          NOT NULL,
+  author_position          TINYINT      NOT NULL,
+  contribution_description TEXT,
+  PRIMARY KEY (output_id, user_id),
+  FOREIGN KEY (output_id) REFERENCES ResearchOutput(output_id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)   REFERENCES User(user_id)             ON DELETE CASCADE
+);
+
+-- ── Equipment ─────────────────────────────────────────────────
+-- ER: Weak entity dependent on Expense.
+-- PK = (equipment_id, expense_id) — domain composite key.
+CREATE TABLE Equipment (
+  equipment_id   VARCHAR(50)  NOT NULL,
+  expense_id     INT          NOT NULL,
+  equipment_name VARCHAR(200) NOT NULL,
+  serial_number  VARCHAR(100),
+  warranty_until DATE,
+  location       VARCHAR(200),
+  PRIMARY KEY (equipment_id, expense_id),
+  FOREIGN KEY (expense_id) REFERENCES Expense(expense_id) ON DELETE CASCADE
+);
+
+-- ════════════════════════════════════════════════════════════
+--  RELATIONSHIP TABLES (M:N associations)
+-- ════════════════════════════════════════════════════════════
+
+-- ── WORKS_ON (User ↔ Project) ─────────────────────────────────
+-- ER: M:N between User and Project with descriptive attributes.
+-- Cardinality: User }—{ Project
+CREATE TABLE WORKS_ON (
+  user_id         INT NOT NULL,
+  project_id      INT NOT NULL,
+  role_in_project ENUM('Lead Researcher','Team Member','Research Assistant') NOT NULL,
+  hours_per_week  TINYINT,
+  stipend_amount  DECIMAL(12,2) DEFAULT 0,
+  PRIMARY KEY (user_id, project_id),
+  FOREIGN KEY (user_id)    REFERENCES User(user_id)       ON DELETE CASCADE,
+  FOREIGN KEY (project_id) REFERENCES Project(project_id) ON DELETE CASCADE
+);
+
+-- ── SUPERVISES (User ↔ User — self-referential) ───────────────
+-- ER: Recursive (unary) relationship on User entity.
+-- Prevents self-supervision via CHECK constraint.
+CREATE TABLE SUPERVISES (
+  supervisor_id     INT         NOT NULL,
+  supervisee_id     INT         NOT NULL,
+  relationship_type ENUM('PhD Advisor','Mentor','Co-Supervisor') NOT NULL,
+  start_date        DATE,
+  PRIMARY KEY (supervisor_id, supervisee_id),
+  FOREIGN KEY (supervisor_id) REFERENCES User(user_id) ON DELETE CASCADE,
+  FOREIGN KEY (supervisee_id) REFERENCES User(user_id) ON DELETE CASCADE,
+  CONSTRAINT chk_no_self_supervise CHECK (supervisor_id != supervisee_id)
+);
+
+-- ── MATCHES (ExternalCall ↔ User — AI results) ────────────────
+-- ER: M:N relationship storing AI grant-matching computed scores.
+-- match_score: 0–100 tinyint — corresponds to cosine similarity %.
+CREATE TABLE MATCHES (
+  call_id           INT            NOT NULL,
+  user_id           INT            NOT NULL,
+  match_score       TINYINT        NOT NULL CHECK (match_score BETWEEN 0 AND 100),
+  match_reason      TEXT,
+  notification_sent BOOLEAN        DEFAULT FALSE,
+  computed_at       TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (call_id, user_id),
+  FOREIGN KEY (call_id) REFERENCES ExternalCall(call_id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES User(user_id)         ON DELETE CASCADE
+);
+
+-- ============================================================
+--  END: schema/01_schema_er.sql
+--  Next: schema/02_views_indexes.sql (Role 2)
+-- ============================================================
