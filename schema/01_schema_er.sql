@@ -173,3 +173,70 @@ CREATE TABLE BudgetHead (
   CONSTRAINT chk_budget_amounts CHECK (allocated_amount > 0 AND spent_amount >= 0)
 );
 
+-- ── Expense ───────────────────────────────────────────────────
+-- ER: Strong entity. Many-to-one with BudgetHead and Project.
+-- approved_by FK references User (Grant Officer / Admin).
+CREATE TABLE Expense (
+  expense_id        INT            NOT NULL AUTO_INCREMENT,
+  amount            DECIMAL(15,2)  NOT NULL,
+  date              DATE           NOT NULL,
+  description       VARCHAR(500),
+  receipt_reference VARCHAR(100),
+  status            ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Pending',
+  budgethead_id     INT            NOT NULL,
+  project_id        INT            NOT NULL,
+  approval_date     DATE,
+  approved_by       INT,
+  PRIMARY KEY (expense_id),
+  FOREIGN KEY (budgethead_id) REFERENCES BudgetHead(budgethead_id) ON DELETE RESTRICT,
+  FOREIGN KEY (project_id)    REFERENCES Project(project_id)       ON DELETE CASCADE,
+  FOREIGN KEY (approved_by)   REFERENCES User(user_id)             ON DELETE SET NULL,
+  CONSTRAINT chk_expense_amount CHECK (amount > 0)
+);
+
+-- ── Milestone ─────────────────────────────────────────────────
+-- ER: Weak entity dependent on Project.
+-- Used by milestone_30day_alert scheduled event (Role 7).
+CREATE TABLE Milestone (
+  milestone_id            INT           NOT NULL AUTO_INCREMENT,
+  project_id              INT           NOT NULL,
+  title                   VARCHAR(200)  NOT NULL,
+  due_date                DATE          NOT NULL,
+  completion_date         DATE,
+  deliverable_description TEXT,
+  status                  ENUM('Pending','Completed','Delayed') NOT NULL DEFAULT 'Pending',
+  report_submitted        BOOLEAN       DEFAULT FALSE,
+  priority                ENUM('High','Medium','Low') NOT NULL DEFAULT 'Medium',
+  PRIMARY KEY (milestone_id),
+  FOREIGN KEY (project_id) REFERENCES Project(project_id) ON DELETE CASCADE
+);
+
+-- ── ResearchOutput ────────────────────────────────────────────
+-- ER: Strong entity linked to Project. Also linked to User via
+--     PublicationAuthor (M:N relationship table below).
+CREATE TABLE ResearchOutput (
+  output_id           INT           NOT NULL AUTO_INCREMENT,
+  project_id          INT           NOT NULL,
+  type                ENUM('Publication','Patent','Prototype','Report') NOT NULL,
+  title               VARCHAR(400)  NOT NULL,
+  authors             TEXT,
+  publication_date    DATE,
+  journal_conference  VARCHAR(300),
+  doi                 VARCHAR(200),
+  status              ENUM('Submitted','Accepted','Published') NOT NULL DEFAULT 'Submitted',
+  PRIMARY KEY (output_id),
+  FOREIGN KEY (project_id) REFERENCES Project(project_id) ON DELETE CASCADE
+);
+
+-- ── Notification ──────────────────────────────────────────────
+-- ER: Weak entity. Output table for triggers & scheduled events.
+CREATE TABLE Notification (
+  notif_id INT       NOT NULL AUTO_INCREMENT,
+  user_id  INT       NOT NULL,
+  message  TEXT      NOT NULL,
+  is_read  BOOLEAN   DEFAULT FALSE,
+  sent_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (notif_id),
+  FOREIGN KEY (user_id) REFERENCES User(user_id) ON DELETE CASCADE
+);
+
