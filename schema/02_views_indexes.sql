@@ -63,6 +63,28 @@ JOIN Grant_      g  ON p.grant_id   = g.grant_id
 WHERE p.pi_id = (SELECT user_id FROM User WHERE email = CURRENT_USER())
 GROUP BY p.project_id, p.project_title, p.current_balance, g.funding_agency;
 
+-- ── ③ Admin_Analytics_View ───────────────────────────────────
+-- Purpose: Aggregated cross-department statistics for Admin dashboard.
+-- Materialization note: In production, use CREATE TABLE ... SELECT or
+--   event-driven refresh to avoid re-computing JOINs on every access.
+CREATE OR REPLACE VIEW Admin_Analytics_View AS
+SELECT
+  d.dept_id,
+  d.dept_name,
+  IFNULL(SUM(g.total_amount_awarded), 0)                              AS total_funding,
+  COUNT(DISTINCT p.project_id)                                        AS total_projects,
+  SUM(CASE WHEN p.status = 'Active'      THEN 1 ELSE 0 END)          AS active_projects,
+  COUNT(DISTINCT ro.output_id)                                        AS total_research_outputs,
+  SUM(CASE WHEN ro.type  = 'Publication' THEN 1 ELSE 0 END)          AS publications,
+  SUM(CASE WHEN ro.type  = 'Patent'      THEN 1 ELSE 0 END)          AS patents,
+  COUNT(DISTINCT CASE WHEN u.role = 'Student' THEN u.user_id END)    AS students_supported
+FROM Department  d
+LEFT JOIN Project        p  ON d.dept_id    = p.department_id
+LEFT JOIN Grant_         g  ON p.grant_id   = g.grant_id
+LEFT JOIN ResearchOutput ro ON p.project_id = ro.project_id
+LEFT JOIN WORKS_ON       wo ON p.project_id = wo.project_id
+LEFT JOIN User           u  ON wo.user_id   = u.user_id
+GROUP BY d.dept_id, d.dept_name;
 
 -- ── ④ Student_Project_View (row-level security) ───────────────
 -- Purpose: Students only see projects they are assigned to via WORKS_ON.
