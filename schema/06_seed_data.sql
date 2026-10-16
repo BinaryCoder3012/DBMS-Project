@@ -32,3 +32,23 @@ INSERT INTO User
 -- ════════════════════════════════════════════════════════════
 --  FUNDING AGENCIES
 -- ════════════════════════════════════════════════════════════
+INSERT INTO FundingAgency (agency_name, contact_person, email, website, funding_focus_areas) VALUES
+  ('Dept. of Science & Technology', 'Dr. R. Kumar',  'grants@dst.gov.in',        'https://dst.gov.in',   'Science, Technology, Renewable Energy'),
+  ('ICMR',                          'Dr. S. Rao',    'extramural@icmr.org.in',   'https://icmr.org.in',  'Medical Research, AI in Healthcare'),
+  ('SERB',                          'Dr. P. Nair',   'grants@serb.gov.in',       'https://serb.gov.in',  'Basic Science, Engineering'),
+  ('MeitY',                         'Dr. A. Gupta',  'grants@meity.gov.in',      'https://meity.gov.in', 'IT, AI, Quantum Computing'),
+  ('ICAR',                          'Dr. M. Sharma', 'grants@icar.gov.in',       'https://icar.gov.in',  'Agriculture, Smart Farming, Precision Agriculture');
+
+-- ════════════════════════════════════════════════════════════
+--  EXTERNAL CALLS
+-- ════════════════════════════════════════════════════════════
+INSERT INTO ExternalCall (title, description, deadline, max_budget, agency_id) VALUES
+  ('DST Solar Mission 2025 – Phase II',   'Grid-scale solar storage and rural electrification; preference for hybrid systems.', '2025-03-31', 5000000.00, 1),
+  ('BIRAC AI in Healthcare Grant',        'AI/ML in diagnostics and drug discovery.',                                          '2025-02-28', 3000000.00, 2),
+  ('SERB National Science Fellowship',    'Fundamental research in renewable energy and materials science.',                    '2025-04-15', 2000000.00, 3),
+  ('MeitY Quantum Computing Initiative', 'Quantum computing for optimisation and simulation.',                                  '2025-05-31', 4500000.00, 4),
+  ('ICAR Smart Agriculture Grant',        'AI-driven precision agriculture and crop monitoring.',                               '2025-01-31', 1800000.00, 5);
+
+-- ════════════════════════════════════════════════════════════
+--  PROPOSALS
+-- ════════════════════════════════════════════════════════════
