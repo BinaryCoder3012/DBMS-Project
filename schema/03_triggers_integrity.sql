@@ -94,3 +94,51 @@ BEGIN
 END //
 
 -- ════════════════════════════════════════════════════════════
+--  TRIGGER 4: auto_close_project
+--  Type:    AFTER UPDATE on Project
+--  Purpose: Automatically set project status to 'Closed' when
+--           end_date has passed and status is still 'Active'.
+--  Note:    In production, this fires on any UPDATE — combine with
+--           the milestone_30day_alert EVENT for scheduled checks.
+-- ════════════════════════════════════════════════════════════
+CREATE TRIGGER auto_close_project
+AFTER UPDATE ON Project
+FOR EACH ROW
+BEGIN
+  IF CURDATE() > NEW.end_date AND NEW.status = 'Active' THEN
+    UPDATE Project
+    SET status = 'Closed'
+    WHERE project_id = NEW.project_id;
+  END IF;
+END //
+
+-- ════════════════════════════════════════════════════════════
+--  TRIGGER 5: prevent_duplicate_expense_receipt
+--  Type:    BEFORE INSERT on Expense
+--  Purpose: Prevent duplicate receipt references within same project.
+--  ACID:    Consistency — guards against accidental double-submission.
+-- ════════════════════════════════════════════════════════════
+CREATE TRIGGER prevent_duplicate_expense_receipt
+BEFORE INSERT ON Expense
+FOR EACH ROW
+BEGIN
+  DECLARE dup_count INT;
+
+  SELECT COUNT(*) INTO dup_count
+  FROM Expense
+  WHERE project_id       = NEW.project_id
+    AND receipt_reference = NEW.receipt_reference
+    AND NEW.receipt_reference IS NOT NULL
+    AND NEW.receipt_reference != '';
+
+  IF dup_count > 0 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'ERR-EXP001: Duplicate receipt reference for this project';
+  END IF;
+END //
+
+DELIMITER ;
+
+-- ════════════════════════════════════════════════════════════
+--  ACID TRANSACTION EXAMPLES
+-- ════════════════════════════════════════════════════════════
