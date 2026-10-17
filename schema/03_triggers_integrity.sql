@@ -71,3 +71,26 @@ BEGIN
 END //
 
 -- ════════════════════════════════════════════════════════════
+--  TRIGGER 3: active_project_limit_pi
+--  Type:    BEFORE INSERT on Proposal
+--  Purpose: Enforce business rule — a PI may not have more than
+--           5 concurrently active projects.
+--  ACID:    Consistency — prevents INSERT that would violate the rule.
+-- ════════════════════════════════════════════════════════════
+CREATE TRIGGER active_project_limit_pi
+BEFORE INSERT ON Proposal
+FOR EACH ROW
+BEGIN
+  DECLARE active_count INT;
+
+  SELECT COUNT(*) INTO active_count
+  FROM Project
+  WHERE pi_id = NEW.pi_id AND status = 'Active';
+
+  IF active_count >= 5 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'ERR-PI001: PI already has 5 active projects; cannot submit new proposal';
+  END IF;
+END //
+
+-- ════════════════════════════════════════════════════════════
