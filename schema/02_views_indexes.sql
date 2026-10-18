@@ -103,3 +103,41 @@ CREATE OR REPLACE VIEW Student_Project_View AS
 --  inverted-index (FULLTEXT) structures.
 -- ════════════════════════════════════════════════════════════
 
+-- ── Clustered Indexes (auto-created on PRIMARY KEY by InnoDB) ─
+-- PK_User(user_id), PK_Project(project_id), PK_Expense(expense_id) ...
+-- No explicit DDL needed — listed here for documentation.
+
+-- ── Non-clustered composite — project search & status filter ──
+-- Query pattern: WHERE project_title LIKE ? AND status = ?
+-- Covers both columns → index-only scan for dashboard list.
+CREATE INDEX IDX_Project_Title_Status
+  ON Project(project_title, status);
+
+-- ── Non-clustered — user name lookup ──────────────────────────
+-- Query pattern: WHERE last_name = ? AND first_name = ?
+CREATE INDEX IDX_User_Name
+  ON User(last_name, first_name);
+
+-- ── Non-clustered composite — expense timeline queries ─────────
+-- Query pattern: WHERE date BETWEEN ? AND ? AND project_id = ?
+CREATE INDEX IDX_Expense_Date_Project
+  ON Expense(date, project_id);
+
+-- ── Non-clustered — milestone upcoming alert ───────────────────
+-- Query pattern: WHERE status='Pending' AND due_date BETWEEN ? AND ?
+CREATE INDEX IDX_Milestone_Status_DueDate
+  ON Milestone(status, due_date);
+
+-- ── FULLTEXT — AI semantic search on proposals ─────────────────
+-- Used by: SELECT ... WHERE MATCH(abstract, title)
+--          AGAINST (? IN NATURAL LANGUAGE MODE)
+CREATE FULLTEXT INDEX FT_Proposal
+  ON Proposal(abstract, title);
+
+-- ── FULLTEXT — AI grant matching on researcher profiles ─────────
+-- Used by: SELECT ... WHERE MATCH(specialization)
+--          AGAINST (? IN NATURAL LANGUAGE MODE)
+CREATE FULLTEXT INDEX FT_User_Specialization
+  ON User(specialization);
+
+-- ── Range partitioning — time-series analytics ────────────────
