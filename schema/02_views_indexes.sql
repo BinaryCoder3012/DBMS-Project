@@ -141,3 +141,38 @@ CREATE FULLTEXT INDEX FT_User_Specialization
   ON User(specialization);
 
 -- ── Range partitioning — time-series analytics ────────────────
+-- Speeds up date-range queries on large Project datasets.
+-- NOTE: Partitioning must be defined at CREATE TABLE time in MySQL.
+--       The ALTER TABLE below is shown for reference architecture only.
+--
+-- ALTER TABLE Project PARTITION BY RANGE (YEAR(start_date)) (
+--   PARTITION p2022    VALUES LESS THAN (2023),
+--   PARTITION p2023    VALUES LESS THAN (2024),
+--   PARTITION p2024    VALUES LESS THAN (2025),
+--   PARTITION p2025    VALUES LESS THAN (2026),
+--   PARTITION pFuture  VALUES LESS THAN MAXVALUE
+-- );
+
+-- ════════════════════════════════════════════════════════════
+--  QUERY OPTIMIZATION EXAMPLES
+-- ════════════════════════════════════════════════════════════
+
+-- Example 1: EXPLAIN on dashboard project fetch (uses IDX_Project_Title_Status)
+-- EXPLAIN SELECT project_id, project_title, status FROM Project
+--   WHERE status = 'Active' ORDER BY project_title;
+
+-- Example 2: Full-text search on researcher profiles
+-- SELECT user_id, first_name, last_name, specialization,
+--        MATCH(specialization) AGAINST ('renewable energy solar' IN NATURAL LANGUAGE MODE) AS relevance
+-- FROM User WHERE role = 'PI'
+-- ORDER BY relevance DESC;
+
+-- Example 3: Index hint — force use of expense date index
+-- SELECT * FROM Expense USE INDEX (IDX_Expense_Date_Project)
+--   WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+--     AND project_id = 1;
+
+-- ============================================================
+--  END: schema/02_views_indexes.sql
+--  Next: schema/03_triggers_integrity.sql (Role 3)
+-- ============================================================
