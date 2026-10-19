@@ -92,3 +92,84 @@ END //
 DELIMITER ;
 
 -- ════════════════════════════════════════════════════════════
+--  SCHEDULED EVENT 1: milestone_30day_alert
+--  Schedule: Daily at midnight
+--  Purpose:  Insert a Notification row for PIs whose milestones
+--            are due in exactly 30 days (mirrors the 30-day
+--            urgency colouring in MilestonesModule.jsx).
+-- ════════════════════════════════════════════════════════════
+CREATE EVENT IF NOT EXISTS milestone_30day_alert
+ON SCHEDULE EVERY 1 DAY
+STARTS CURDATE()
+DO
+  INSERT INTO Notification(user_id, message, sent_at)
+  SELECT
+    p.pi_id,
+    CONCAT('⚠ Milestone due in 30 days: "', m.title,
+           '" for project: ', p.project_title,
+           ' — Deliverable: ', IFNULL(m.deliverable_description, 'N/A')),
+    NOW()
+  FROM Milestone m
+  JOIN Project p ON m.project_id = p.project_id
+  WHERE m.status   = 'Pending'
+    AND m.due_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY);
+
+-- ════════════════════════════════════════════════════════════
+--  SCHEDULED EVENT 2: monthly_budget_snapshot
+--  Schedule: 1st of every month
+--  Purpose:  Archive current BudgetHead balances for trend analysis
+--            and audit trail. Creates a snapshot in BudgetSnapshot.
+-- ════════════════════════════════════════════════════════════
+
+-- Snapshot archive table (created once)
+CREATE TABLE IF NOT EXISTS BudgetSnapshot (
+  snapshot_id    INT            NOT NULL AUTO_INCREMENT,
+  snapshot_date  DATE           NOT NULL,
+  budgethead_id  INT            NOT NULL,
+  project_id     INT            NOT NULL,
+  category       VARCHAR(20)    NOT NULL,
+  allocated_amount DECIMAL(15,2),
+  spent_amount     DECIMAL(15,2),
+  remaining_balance DECIMAL(15,2),
+  PRIMARY KEY (snapshot_id),
+  INDEX IDX_Snapshot_Date (snapshot_date)
+);
+
+CREATE EVENT IF NOT EXISTS monthly_budget_snapshot
+ON SCHEDULE EVERY 1 MONTH
+STARTS DATE_ADD(LAST_DAY(CURDATE()), INTERVAL 1 DAY)
+DO
+  INSERT INTO BudgetSnapshot
+    (snapshot_date, budgethead_id, project_id, category,
+     allocated_amount, spent_amount, remaining_balance)
+  SELECT
+    CURDATE(),
+    bh.budgethead_id,
+    bh.project_id,
+    bh.category,
+    bh.allocated_amount,
+    bh.spent_amount,
+    bh.remaining_balance
+  FROM BudgetHead bh
+  JOIN Project p ON bh.project_id = p.project_id
+  WHERE p.status = 'Active';
+
+-- ════════════════════════════════════════════════════════════
+--  SCHEDULED EVENT 3: grant_closure_check
+--  Schedule: Daily
+--  Purpose:  Automatically mark grants as 'Closed' when their
+--            end_date has passed (complements auto_close_project trigger).
+-- ════════════════════════════════════════════════════════════
+CREATE EVENT IF NOT EXISTS grant_closure_check
+ON SCHEDULE EVERY 1 DAY
+STARTS CURDATE()
+DO
+  UPDATE Grant_
+  SET status = 'Closed'
+  WHERE status   = 'Active'
+    AND end_date < CURDATE();
+
+-- ════════════════════════════════════════════════════════════
+--  BACKUP & RECOVERY STRATEGY
+-- ════════════════════════════════════════════════════════════
+
