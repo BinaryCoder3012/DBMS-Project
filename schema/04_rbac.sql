@@ -83,3 +83,60 @@ GRANT SELECT ON unigrant.Student_Project_View TO student_role;
 
 -- ════════════════════════════════════════════════════════════
 --  DATABASE USERS
+--  Application-level users bound to their roles.
+--  In production: use connection pooling with role-specific credentials.
+-- ════════════════════════════════════════════════════════════
+CREATE USER IF NOT EXISTS 'admin_user'@'%'          IDENTIFIED BY 'AdminPass!1';
+CREATE USER IF NOT EXISTS 'pi_user'@'%'             IDENTIFIED BY 'PIPass!1';
+CREATE USER IF NOT EXISTS 'grant_officer_user'@'%'  IDENTIFIED BY 'GOPass!1';
+CREATE USER IF NOT EXISTS 'student_user'@'%'        IDENTIFIED BY 'StudPass!1';
+
+GRANT admin_role         TO 'admin_user'@'%';
+GRANT pi_role            TO 'pi_user'@'%';
+GRANT grant_officer_role TO 'grant_officer_user'@'%';
+GRANT student_role       TO 'student_user'@'%';
+
+-- Activate roles on login (MySQL 8.0+)
+SET DEFAULT ROLE ALL TO
+  'admin_user'@'%',
+  'pi_user'@'%',
+  'grant_officer_user'@'%',
+  'student_user'@'%';
+
+-- ════════════════════════════════════════════════════════════
+--  PRIVILEGE MATRIX SUMMARY
+-- ════════════════════════════════════════════════════════════
+-- Table/View           | Admin | PI | Grant Officer | Student
+-- ─────────────────────┼───────┼────┼───────────────┼────────
+-- User                 |  ALL  |  — |      —        |   —
+-- Department           |  ALL  |  — |      —        |   —
+-- Proposal             |  ALL  | RW |      R        |   —
+-- Grant_               |  ALL  |  R |      R        |   —
+-- Project              |  ALL  |  R |      R        |   —
+-- BudgetHead           |  ALL  |  R |      R        |   —
+-- Expense              |  ALL  | RI |     RU        |   —
+-- Milestone            |  ALL  | RIU|      —        |   —
+-- ResearchOutput       |  ALL  | RI |      —        |   —
+-- Public_Project_View  |  ALL  |  R |      R        |   R
+-- PI_Dashboard_View    |  ALL  |  R |      —        |   —
+-- Admin_Analytics_View |  ALL  |  — |      —        |   —
+-- Student_Project_View |  ALL  |  — |      —        |   R
+-- ─────────────────────┴───────┴────┴───────────────┴────────
+-- R=SELECT, I=INSERT, U=UPDATE, W=DELETE, ALL=all privileges
+
+-- ════════════════════════════════════════════════════════════
+--  ROW-LEVEL SECURITY NOTES
+-- ════════════════════════════════════════════════════════════
+-- MySQL 8.0 does not have native row-level security policies (unlike PostgreSQL).
+-- We enforce row-level restrictions via:
+--   1. View WHERE clauses (Student_Project_View, PI_Dashboard_View)
+--   2. Application-layer filtering (api.js JWT claims → WHERE pi_id = current_user)
+--   3. CURRENT_USER() in view definitions for identity-based filtering
+--
+-- For production, consider using MySQL's SECURITY DEFINER views or
+-- a connection-per-user pooling strategy to enforce row isolation.
+
+-- ============================================================
+--  END: schema/04_rbac.sql
+--  Next: schema/05_stored_procs_events.sql (Role 7)
+-- ============================================================
