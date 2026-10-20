@@ -64,6 +64,29 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// ── Read endpoints (GET all rows) ─────────────────────────────────────────────
+
+// GET /api/users
+app.get("/api/users", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT user_id, first_name, last_name, email, role,
+              dept_id, specialization, phone, hire_date
+       FROM User`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/departments
+app.get("/api/departments", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Department");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/proposals
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
