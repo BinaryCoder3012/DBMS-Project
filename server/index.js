@@ -43,6 +43,27 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
+// ── Authentication ────────────────────────────────────────────────────────────
+// POST /api/auth/login
+// Body: { email, password }   →   Returns user row (no password_hash)
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: "email and password required" });
+  try {
+    const [rows] = await pool.execute(
+      `SELECT user_id, first_name, last_name, email, role,
+              dept_id, specialization, phone, hire_date
+       FROM User
+       WHERE email = ? AND password_hash = SHA2(?, 256)`,
+      [email, password]
+    );
+    if (rows.length === 0) return res.status(401).json({ error: "Invalid credentials" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
