@@ -41,7 +41,7 @@ Completed: requirements and business rules, the full EER/ER model (below), relat
 |---|---|
 | Requirements and business rules (BR1 to BR10) | Done |
 | EER / ER model and relational mapping | Done |
-| DDL: 19 relations, keys, 11 CHECK constraints | Done |
+| DDL: 18 relations, keys, 11 CHECK constraints | Done |
 | Repository, README, mid-sem report | Done |
 | Seed data (500+ rows) | In progress |
 | Views and indexes | In progress |
@@ -56,11 +56,11 @@ Completed: requirements and business rules, the full EER/ER model (below), relat
 
 ## ER / EER modelling
 
-The model has 12 strong entities, 3 weak or associative entities with composite keys (`Dependent`, `Equipment`, `PublicationAuthor`), 3 M:N relationships carrying attributes (`WORKS_ON`, `MATCHES`, recursive `SUPERVISES`) and one specialisation of `User` by `role`. `BudgetHead` and `Milestone` are existence-dependent on `Project` (NOT NULL foreign key, `ON DELETE CASCADE`).
+The model has 12 strong entities, 2 weak entities whose keys include their owner's key (`Dependent`, `Equipment`), 4 M:N relationships stored as tables (`WORKS_ON`, `MATCHES`, `PublicationAuthor`, recursive `SUPERVISES`) and one specialisation of `User` by `role`: 18 relations in all. `BudgetHead` and `Milestone` are existence-dependent on `Project` (NOT NULL foreign key, `ON DELETE CASCADE`), but they have their own single-column keys, so they are strong entities with total participation, not weak entities.
 
 ### Chen notation (rectangles and diamonds)
 
-Rectangles are entities, double rectangles are weak entities, diamonds are relationships, double diamonds are identifying relationships. Labels 1, N, M are cardinalities.
+Rectangles are entities, double rectangles are weak entities, diamonds are relationships, double diamonds are identifying relationships. Labels 1, N, M are cardinalities. A double line is total participation (the foreign key is NOT NULL); a single line is partial. Ovals are attributes stored on the M:N relationship tables, and a dashed underline marks a weak entity's partial key. The diagram is generated from `docs/diagrams/chen_notation.py`.
 
 ![Chen notation EER](docs/images/eer_chen_notation.png)
 
@@ -116,7 +116,7 @@ erDiagram
 |---|---|---|---|
 | employs | Department, User | 1:N | dept nullable (SET NULL) |
 | submits | User (PI), Proposal | 1:N | Proposal total |
-| becomes | Proposal, Grant_ | 1:0..1 | `UNIQUE(proposal_id)` planned |
+| becomes | Proposal, Grant_ | 1:0..1 | `UNIQUE(proposal_id)` enforced |
 | funds | Grant_, Project | 1:N | Project partial |
 | hosts | Department, Project | 1:N | |
 | leads | User (PI), Project | 1:N | Project total |
