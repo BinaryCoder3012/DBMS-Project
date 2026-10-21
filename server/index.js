@@ -87,6 +87,84 @@ app.get("/api/departments", async (_req, res) => {
 });
 
 // GET /api/proposals
+app.get("/api/proposals", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Proposal");
+    // Convert tinyint boolean to JS boolean
+    res.json(rows.map(r => ({ ...r, eligibility_check_passed: !!r.eligibility_check_passed })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/grants
+app.get("/api/grants", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Grant_");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/projects
+app.get("/api/projects", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Project");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/budget-heads
+app.get("/api/budget-heads", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM BudgetHead");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/expenses
+app.get("/api/expenses", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Expense");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/milestones
+app.get("/api/milestones", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM Milestone");
+    res.json(rows.map(r => ({ ...r, report_submitted: !!r.report_submitted })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/research-outputs
+app.get("/api/research-outputs", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM ResearchOutput");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/external-calls
+// Joins FundingAgency to surface focus areas (used by AI Grant Matcher)
+app.get("/api/external-calls", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT ec.call_id, ec.title, ec.description, ec.deadline, ec.max_budget,
+              COALESCE(fa.funding_focus_areas, '') AS focus
+       FROM ExternalCall ec
+       LEFT JOIN FundingAgency fa ON ec.agency_id = fa.agency_id`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/works-on
+app.get("/api/works-on", async (_req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM WORKS_ON");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
