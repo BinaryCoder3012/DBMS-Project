@@ -165,8 +165,90 @@ app.get("/api/works-on", async (_req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Write endpoints ───────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`UniGrant API listening on http://localhost:${PORT}`);
+// POST /api/proposals  — create a new proposal (Draft)
+app.post("/api/proposals", async (req, res) => {
+  const { title, abstract, total_budget_requested, duration_months, pi_id } = req.body;
+  try {
+    const [result] = await pool.execute(
+      `INSERT INTO Proposal
+         (title, abstract, total_budget_requested, duration_months,
+          submission_date, status, eligibility_check_passed, pi_id)
+       VALUES (?, ?, ?, ?, CURDATE(), 'Draft', TRUE, ?)`,
+      [title, abstract || "", total_budget_requested, duration_months, pi_id]
+    );
+    res.json({ proposal_id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
+
+// POST /api/expenses  — create a pending expense
+// The DB trigger balance_check_before_expense fires BEFORE INSERT and
+// signals SQLSTATE '45000' if remaining_balance < amount — that
+// exception propagates here as a mysql2 error.
+app.post("/api/expenses", async (req, res) => {
+  const { project_id, budgethead_id, amount, description, receipt_reference } = req.body;
+  try {
+    const [result] = await pool.execute(
+      `INSERT INTO Expense
+         (project_id, budgethead_id, amount, description, receipt_reference, status, date)
+       VALUES (?, ?, ?, ?, ?, 'Pending', CURDATE())`,
+      [project_id, budgethead_id, amount, description || "", receipt_reference || ""]
+    );
+    res.json({ expense_id: result.insertId });
+  } catch (err) {
+    // Trigger fired (ERR-BH001) or constraint violation
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PATCH /api/expenses/:id/approve  — approve an expense (ACID transaction)
+// The DB trigger update_budget_on_approval fires AFTER the UPDATE and
+// adjusts BudgetHead.spent_amount automatically.
+app.patch("/api/expenses/:id/approve", async (req, res) => {
+  const { approved_by } = req.body;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `UPDATE Expense
+       SET status = 'Approved', approved_by = ?, approval_date = CURDATE()
+       WHERE expense_id = ?`,
+      [approved_by, req.params.id]
+    );
+    // Trigger update_budget_on_approval fires AFTER this UPDATE in MySQL
+    await conn.commit();
+    res.json({ success: true });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// PATCH /api/expenses/:id/reject  — reject a pending expense
+app.patch("/api/expenses/:id/reject", async (req, res) => {
+  try {
+    await pool.execute(
+      "UPDATE Expense SET status = 'Rejected' WHERE expense_id = ?",
+      [req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3001;
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    console.log(`UniGrant API listening on http://localhost:${PORT}`);
+    console.log(`MySQL: ${process.env.DB_USER || "root"}@${process.env.DB_HOST || "localhost"}/${process.env.DB_NAME || "unigrant"}`);
+  });
+}
+
+module.exports = app;
