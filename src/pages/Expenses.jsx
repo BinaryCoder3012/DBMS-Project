@@ -1,3 +1,4 @@
+// Real-time budget balance validation and SQLSTATE 45000 alert handling
 /**
  * Expenses. Two workflows meet here:
  *   PI logs an expense  → balance_check_before_expense may refuse it
