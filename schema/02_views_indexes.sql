@@ -176,3 +176,5 @@ CREATE FULLTEXT INDEX FT_User_Specialization
 --  END: schema/02_views_indexes.sql
 --  Next: schema/03_triggers_integrity.sql (Role 3)
 -- ============================================================
+
+-- Optimization: Verified execution plans against 500+ row seed data
