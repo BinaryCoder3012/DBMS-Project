@@ -222,3 +222,29 @@ mysql -u root -p < schema/04_rbac.sql
 mysql -u root -p < schema/05_stored_procs_events.sql
 mysql -u root -p < schema/06_seed_data.sql
 ```
+
+
+## Setup and Execution Guide
+
+### Database Setup
+```bash
+mysql -u root -p < schema/01_schema_er.sql
+mysql -u root -p < schema/02_views_indexes.sql
+mysql -u root -p < schema/03_triggers_integrity.sql
+mysql -u root -p < schema/04_rbac.sql
+mysql -u root -p < schema/05_stored_procs_events.sql
+mysql -u root -p < schema/06_seed_data.sql
+```
+
+### Backend Setup
+```bash
+cd server
+npm install
+npm run dev
+```
+
+### Frontend Setup
+```bash
+npm install
+npm run dev
+```
