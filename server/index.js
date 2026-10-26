@@ -1,3 +1,4 @@
+// Enhanced SQLSTATE 45000 business rule error mapping for transactions
 /**
  * UniGrant — Express + MySQL2 REST API
  * ──────────────────────────────────────
