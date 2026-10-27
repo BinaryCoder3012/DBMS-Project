@@ -142,3 +142,78 @@ DELIMITER ;
 -- ════════════════════════════════════════════════════════════
 --  ACID TRANSACTION EXAMPLES
 -- ════════════════════════════════════════════════════════════
+
+-- ── Expense Approval Transaction ──────────────────────────────
+-- Atomically approves an expense and updates BudgetHead.
+-- If any statement fails, ROLLBACK restores prior state.
+--
+-- START TRANSACTION;
+--
+--   -- Lock the expense row (prevents concurrent approval)
+--   SELECT * FROM Expense WHERE expense_id = 3 FOR UPDATE;
+--
+--   -- Approve the expense
+--   UPDATE Expense
+--   SET status = 'Approved', approved_by = 4, approval_date = NOW()
+--   WHERE expense_id = 3;
+--   -- ↑ Trigger update_budget_on_approval fires here automatically
+--
+-- COMMIT;
+-- -- OR: ROLLBACK; if any validation fails
+
+-- ── Budget Transfer Transaction ────────────────────────────────
+-- Move funds between two budget heads within the same project.
+--
+-- START TRANSACTION;
+--
+--   SELECT remaining_balance FROM BudgetHead
+--   WHERE budgethead_id = 1 FOR UPDATE;
+--
+--   SELECT remaining_balance FROM BudgetHead
+--   WHERE budgethead_id = 2 FOR UPDATE;
+--
+--   -- Debit source head
+--   UPDATE BudgetHead SET allocated_amount = allocated_amount - 50000
+--   WHERE budgethead_id = 1;
+--
+--   -- Credit target head
+--   UPDATE BudgetHead SET allocated_amount = allocated_amount + 50000
+--   WHERE budgethead_id = 2;
+--
+-- COMMIT;
+
+-- ════════════════════════════════════════════════════════════
+--  ISOLATION LEVEL STRATEGY
+-- ════════════════════════════════════════════════════════════
+-- Default: REPEATABLE READ (InnoDB default)
+-- For expense approval: Use READ COMMITTED to avoid long-held locks.
+-- For financial reporting: Use SERIALIZABLE to prevent phantom reads.
+--
+-- SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+-- START TRANSACTION;
+-- ... expense approval ...
+-- COMMIT;
+--
+-- SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+-- START TRANSACTION;
+-- ... generate_annual_report() call ...
+-- COMMIT;
+
+-- ════════════════════════════════════════════════════════════
+--  CHECK CONSTRAINTS SUMMARY (all defined in 01_schema_er.sql)
+-- ════════════════════════════════════════════════════════════
+-- Proposal:  chk_proposal_budget   → total_budget_requested > 0
+-- Proposal:  chk_proposal_duration → duration_months > 0
+-- Grant_:    chk_grant_dates       → end_date > start_date
+-- Grant_:    chk_grant_amount      → total_amount_awarded > 0
+-- Project:   chk_project_dates     → end_date > start_date
+-- Project:   chk_project_balance   → current_balance >= 0
+-- BudgetHead:chk_budget_amounts    → allocated_amount > 0 AND spent_amount >= 0
+-- Expense:   chk_expense_amount    → amount > 0
+-- MATCHES:   (inline)              → match_score BETWEEN 0 AND 100
+-- SUPERVISES:chk_no_self_supervise → supervisor_id != supervisee_id
+
+-- ============================================================
+--  END: schema/03_triggers_integrity.sql
+--  Next: schema/04_rbac.sql (Role 5)
+-- ============================================================
