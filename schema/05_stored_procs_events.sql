@@ -173,3 +173,49 @@ DO
 --  BACKUP & RECOVERY STRATEGY
 -- ════════════════════════════════════════════════════════════
 
+-- ── Full logical backup (mysqldump) ───────────────────────────
+-- Run nightly via cron. Produces SQL dump for point-in-time restore.
+--
+-- $ mysqldump -u admin_user -p unigrant \
+--     --single-transaction \
+--     --routines \
+--     --triggers \
+--     --events \
+--     --hex-blob \
+--   > /backups/unigrant_$(date +%Y%m%d_%H%M%S).sql
+--
+-- --single-transaction: uses InnoDB snapshot, no table locks
+-- --routines:           includes stored procedures
+-- --triggers:           includes all trigger definitions
+-- --events:             includes scheduled events
+
+-- ── Incremental backup (binary log) ──────────────────────────
+-- Enable binary logging in my.cnf:
+--   [mysqld]
+--   log_bin = /var/log/mysql/binlog
+--   binlog_format = ROW
+--   expire_logs_days = 7
+--
+-- Point-in-time recovery to T (after restoring full dump):
+--   $ mysqlbinlog --start-datetime="2025-01-01 00:00:00" \
+--                 --stop-datetime="2025-01-15 14:30:00" \
+--                 /var/log/mysql/binlog.000001 | mysql -u root -p unigrant
+
+-- ── Backup verification (weekly) ──────────────────────────────
+-- Restore to a test instance and verify row counts:
+--   $ mysql -u admin_user -p unigrant_test < /backups/unigrant_latest.sql
+--   $ mysql -u admin_user -p -e \
+--       "SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES
+--        WHERE TABLE_SCHEMA='unigrant_test';"
+
+-- ── Replication setup (High Availability) ─────────────────────
+-- Primary-Replica setup for read scaling:
+--   On primary:  GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'replica_host';
+--   On replica:  CHANGE MASTER TO MASTER_HOST='primary_host',
+--                  MASTER_USER='replica_user', MASTER_AUTO_POSITION=1;
+--                START SLAVE;
+
+-- ============================================================
+--  END: schema/05_stored_procs_events.sql
+--  Next: schema/06_seed_data.sql (Role 1)
+-- ============================================================
