@@ -1,4 +1,3 @@
-// Enhanced SQLSTATE 45000 business rule error mapping for transactions
 /**
  * UniGrant — Express + MySQL2 REST API
  * ──────────────────────────────────────
@@ -32,6 +31,8 @@ const pool = mysql.createPool({
   database:         process.env.DB_NAME || "unigrant",
   waitForConnections: true,
   connectionLimit:  10,
+  enableKeepAlive:  true,
+  keepAliveInitialDelay: 10000,
 });
 
 // ── Health check ──────────────────────────────────────────────────────────────
