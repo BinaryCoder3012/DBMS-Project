@@ -375,3 +375,5 @@ code, pre, .mono { font-family: var(--mono); font-feature-settings: normal; }
   .life-step:nth-child(n+4) { border-top: 1px solid var(--line); }
   .toolbar { flex-wrap: wrap; }
 }
+
+/* Responsive typography and accessibility enhancement */
