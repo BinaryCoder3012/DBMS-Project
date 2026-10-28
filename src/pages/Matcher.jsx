@@ -1,3 +1,4 @@
+// Refined keyword TF-IDF weighting and faculty specialization match scores
 /**
  * Grant matcher. Scores open ExternalCall rows against a PI's specialisation
  * and stores the result in MATCHES (CHECK match_score BETWEEN 0 AND 100).
