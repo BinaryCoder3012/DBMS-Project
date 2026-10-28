@@ -2,232 +2,278 @@
 
 **CS F212 Database Systems | BITS Pilani, Hyderabad Campus | Group-25**
 
-UniGrant keeps the whole life of a university research grant in one relational database: proposal, review, award, projects, budget heads, expenses, milestones, publications and reports. The rules that matter most (no overspending a budget head, at most 5 active projects per PI, no duplicate receipts, no self-supervision) are enforced by the DBMS through constraints and triggers, so they hold no matter which client touches the data.
+UniGrant is a centralised relational database application for university research grant lifecycle management — from first proposal submission, compliance review, and grant award to budget head tracking, atomic expense approvals, milestone alerts, and research output archiving.
+
+All business rules (no budget overspending, maximum 5 active projects per PI, duplicate receipt prevention, strict date ordering) are enforced by the MySQL 8.0 DBMS through CHECK constraints and triggers.
 
 ---
 
-## Team and contributions
+# UniGrant — Research Grant Management System
 
-| Member | Roll number | Contribution |
-|---|---|---|
-| Chaitrali Shrikant Dharmadhikari | 2024A7PS0133H | Transactions, concurrency and integrity: triggers (`03_triggers_integrity.sql`), stored procedures and scheduled events (`05_stored_procs_events.sql`), expense approval screen, concurrent-approval tests |
-| Maddela Bhargava Krishna Reddy | 2024A8PS0349H | Backend API and access control: `server/index.js`, connection pool, error mapping, REST routes, `04_rbac.sql`, login and user-management screens |
-| Lakshya Sachdeva | 2024A8PS0468H | Schema and EER modelling: EER/ER diagrams, relational mapping, normalisation notes, `01_schema_er.sql`, seed data (`06_seed_data.sql`), README and integration |
-| Risha Sinha | 2024A8PS0485H | Frontend: design system, app shell, sidebar, dashboard, Proposals, Projects, Milestones, Outputs, Grants and Departments screens, usability checks |
-| Arnav Gupta | 2024A8PS0487H | Queries and analytics: views and indexes (`02_views_indexes.sql`), `EXPLAIN` review, DBA console, analytics module, full-text matcher, backup and recovery notes |
-
-Responsibility matrix (● lead, ○ support or reviewer):
-
-| Area | Chaitrali | Bhargava | Lakshya | Risha | Arnav |
-|---|:-:|:-:|:-:|:-:|:-:|
-| EER and relational schema | ○ | ○ | ● | ○ | ○ |
-| Seed data and constraints | ○ |  | ● |  | ○ |
-| Views and indexes |  |  | ○ |  | ● |
-| Triggers and transactions | ● | ○ |  |  |  |
-| Procedures and events | ● |  |  |  | ○ |
-| RBAC and authentication | ○ | ● |  | ○ |  |
-| REST API | ○ | ● | ○ |  | ○ |
-| Frontend screens | ○ | ○ |  | ● | ○ |
-| Analytics and reports |  |  |  | ○ | ● |
-| Documentation and report | ○ | ○ | ● | ○ | ○ |
+A centralised DBMS for university research grant lifecycle management — from first proposal to final closure. Built with React (frontend) and MySQL 8.0+ (backend schema).
 
 ---
 
-## Current progress (mid-semester)
+## Team & File Ownership
 
-Completed: requirements and business rules, the full EER/ER model (below), relational mapping, DDL with all keys and constraints, repository scaffold, mid-semester report. In progress: seed data, views and indexes, trigger drafts, API scaffold. Planned: remaining DB objects, React screens, analytics, integration and testing.
-
-| Component | State |
-|---|---|
-| Requirements and business rules (BR1 to BR10) | Done |
-| EER / ER model and relational mapping | Done |
-| DDL: 18 relations, keys, 11 CHECK constraints | Done |
-| Repository, README, mid-sem report | Done |
-| Seed data (500+ rows) | In progress |
-| Views and indexes | In progress |
-| Triggers, transactions, RBAC | In progress |
-| Express API and authentication | In progress |
-| React screens | Planned |
-| Analytics, backup and recovery notes | Planned |
-
-![Build schedule](docs/images/schedule.png)
+| # | Role | Member | Files Owned |
+|---|------|--------|-------------|
+| 1 | Database Schema & ER Modeling Engineer | | `schema/01_schema_er.sql`, `schema/06_seed_data.sql` |
+| 2 | SQL & Query Optimization Engineer | | `schema/02_views_indexes.sql`, `src/components/DBAConsole.jsx` |
+| 3 | Transaction, Concurrency & Integrity Engineer | | `schema/03_triggers_integrity.sql`, `src/components/ExpenseModule.jsx` |
+| 4 | Backend API & DB Integration Engineer | | `api.js`, `src/database.js`, `src/utils.js` |
+| 5 | Authentication & Role-Based Access Engineer | | `schema/04_rbac.sql`, `src/auth.js`, `src/components/Login.jsx`, `src/components/UsersModule.jsx` |
+| 6 | Frontend & DB Interaction Engineer | | `src/styles.js`, `src/components/ui.jsx`, `src/components/Sidebar.jsx`, `src/components/Dashboard.jsx`, `src/components/ProposalsModule.jsx`, `src/components/ProjectsModule.jsx`, `src/components/MilestonesModule.jsx`, `src/components/OutputsModule.jsx`, `src/components/GrantsModule.jsx`, `src/components/AIGrantMatcher.jsx`, `src/components/DepartmentsModule.jsx`, `src/App.jsx` |
+| 7 | Backup, Recovery & Analytics Engineer | | `schema/05_stored_procs_events.sql`, `src/analytics.js`, `src/components/Analytics.jsx` |
 
 ---
 
-## ER / EER modelling
-
-The model has 12 strong entities, 2 weak entities whose keys include their owner's key (`Dependent`, `Equipment`), 4 M:N relationships stored as tables (`WORKS_ON`, `MATCHES`, `PublicationAuthor`, recursive `SUPERVISES`) and one specialisation of `User` by `role`: 18 relations in all. `BudgetHead` and `Milestone` are existence-dependent on `Project` (NOT NULL foreign key, `ON DELETE CASCADE`), but they have their own single-column keys, so they are strong entities with total participation, not weak entities.
-
-### Chen notation (rectangles and diamonds)
-
-Rectangles are entities, double rectangles are weak entities, diamonds are relationships, double diamonds are identifying relationships. Labels 1, N, M are cardinalities. A double line is total participation (the foreign key is NOT NULL); a single line is partial. Ovals are attributes stored on the M:N relationship tables, and a dashed underline marks a weak entity's partial key. The diagram is generated from `docs/diagrams/chen_notation.py`.
-
-![Chen notation EER](docs/images/eer_chen_notation.png)
-
-### Crow's foot EER views with attributes
-
-Organisation, people and external funding:
-
-![EER view 1](docs/images/eer_view1_org_funding.png)
-
-Proposal to grant to project:
-
-![EER view 2](docs/images/eer_view2_grant_lifecycle.png)
-
-Spending, milestones and research outputs:
-
-![EER view 3](docs/images/eer_view3_spending_outputs.png)
-
-### Specialisation of User
-
-![ISA of User](docs/images/isa_user.png)
-
-The four roles (Admin, PI, Grant Officer, Student) differ in privileges, not stored attributes, so the hierarchy is a single table with a discriminator (`User.role`).
-
-### Same model as an ER diagram (renders on GitHub)
-
-```mermaid
-erDiagram
-    DEPARTMENT ||--o{ USER : employs
-    DEPARTMENT ||--o{ PROJECT : hosts
-    USER ||--o{ PROPOSAL : submits
-    USER ||--o{ PROJECT : leads
-    USER }o--o{ PROJECT : WORKS_ON
-    USER |o--o{ EXPENSE : approves
-    USER ||--o{ DEPENDENT : has
-    USER ||--o{ NOTIFICATION : receives
-    USER }o--o{ USER : SUPERVISES
-    USER }o--o{ EXTERNALCALL : MATCHES
-    USER }o--o{ RESEARCHOUTPUT : PUBLICATION_AUTHOR
-    FUNDINGAGENCY ||--o{ EXTERNALCALL : issues
-    PROPOSAL |o--o| GRANT_ : becomes
-    GRANT_ ||--o{ PROJECT : funds
-    PROJECT ||--|{ BUDGETHEAD : allocates
-    PROJECT ||--o{ MILESTONE : tracks
-    PROJECT ||--o{ EXPENSE : incurs
-    PROJECT ||--o{ RESEARCHOUTPUT : produces
-    BUDGETHEAD ||--o{ EXPENSE : charged_to
-    EXPENSE ||--o{ EQUIPMENT : buys
-```
-
-### Relationship table
-
-| Relationship | Participants | Cardinality | Notes |
-|---|---|---|---|
-| employs | Department, User | 1:N | dept nullable (SET NULL) |
-| submits | User (PI), Proposal | 1:N | Proposal total |
-| becomes | Proposal, Grant_ | 1:0..1 | `UNIQUE(proposal_id)` enforced |
-| funds | Grant_, Project | 1:N | Project partial |
-| hosts | Department, Project | 1:N | |
-| leads | User (PI), Project | 1:N | Project total |
-| WORKS_ON | User, Project | M:N | role, hours/week, stipend |
-| allocates | Project, BudgetHead | 1:N | BudgetHead existence-dependent |
-| incurs | Project, Expense | 1:N | |
-| charged to | BudgetHead, Expense | 1:N | |
-| approves | User, Expense | 1:N | Expense partial |
-| buys | Expense, Equipment | 1:N | Equipment weak |
-| tracks | Project, Milestone | 1:N | Milestone existence-dependent |
-| produces | Project, ResearchOutput | 1:N | |
-| PUBLICATION_AUTHOR | User, ResearchOutput | M:N | author position, contribution |
-| SUPERVISES | User, User | M:N | recursive, type, start date |
-| MATCHES | ExternalCall, User | M:N | score 0 to 100, reason |
-| issues | FundingAgency, ExternalCall | 1:N | |
-| has | User, Dependent | 1:N | Dependent weak |
-| receives | User, Notification | 1:N | |
-
----
-
-## Relational schema
-
-| Relation | Primary key | Foreign keys (ON DELETE) |
-|---|---|---|
-| Department | dept_id | none |
-| User | user_id | dept_id → Department (SET NULL); UNIQUE email, ssn |
-| FundingAgency | agency_id | none |
-| ExternalCall | call_id | agency_id → FundingAgency (CASCADE) |
-| Proposal | proposal_id | pi_id → User (RESTRICT) |
-| Grant_ | grant_id | proposal_id → Proposal (SET NULL) |
-| Project | project_id | department_id → Department (SET NULL); grant_id → Grant_ (SET NULL); pi_id → User (RESTRICT) |
-| BudgetHead | budgethead_id | project_id → Project (CASCADE) |
-| Expense | expense_id | budgethead_id → BudgetHead (RESTRICT); project_id → Project (CASCADE); approved_by → User (SET NULL) |
-| Milestone | milestone_id | project_id → Project (CASCADE) |
-| ResearchOutput | output_id | project_id → Project (CASCADE) |
-| Notification | notif_id | user_id → User (CASCADE) |
-| Dependent | (user_id, dependent_name) | user_id → User (CASCADE) |
-| PublicationAuthor | (output_id, user_id) | output_id → ResearchOutput; user_id → User (CASCADE) |
-| Equipment | (equipment_id, expense_id) | expense_id → Expense (CASCADE) |
-| WORKS_ON | (user_id, project_id) | both CASCADE |
-| SUPERVISES | (supervisor_id, supervisee_id) | both → User (CASCADE) |
-| MATCHES | (call_id, user_id) | call_id → ExternalCall; user_id → User (CASCADE) |
-| BudgetSnapshot | snapshot_id | none (archive written by a scheduled event) |
-
-Key constraints: `DECIMAL(15,2)` for all money, `ENUM` for every status, 11 CHECK constraints (positive amounts, `end_date > start_date`, no self-supervision, score 0 to 100), and `BudgetHead.remaining_balance` as a stored generated column. The grant table is named `Grant_` because `GRANT` is a reserved word.
-
-### Business rules enforced by the DBMS
-
-| ID | Rule | Mechanism |
-|---|---|---|
-| BR1 | Expense cannot exceed the budget head's remaining balance | Trigger `balance_check_before_expense` |
-| BR2 | Approval updates the budget head atomically | Trigger `update_budget_on_approval` in a transaction |
-| BR3 | A PI has at most 5 active projects when proposing | Trigger `active_project_limit_pi` |
-| BR4 | Receipt reference unique per project | Trigger `prevent_duplicate_expense_receipt` |
-| BR5 | Dates ordered, amounts positive | CHECK constraints |
-| BR6 | No self-supervision | CHECK `chk_no_self_supervise` |
-| BR7 | Students see only assigned projects, no financial columns | Views |
-| BR8 | Grant officers cannot create users | `REVOKE CREATE USER` |
-| BR9 | Expired active grants auto-close | Event `grant_closure_check` |
-| BR10 | 30-day milestone alert to PI | Event `milestone_30day_alert` |
-
----
-
-## Architecture and technology stack
-
-Front End ↔ Application ↔ Relational Database.
-
-| Layer | Technology |
-|---|---|
-| Database | MySQL 8.0 (InnoDB) |
-| Backend | Node.js, Express 4, `mysql2/promise` |
-| Frontend | React 19, Vite 8 |
-| Security | SHA-256 password hashing, role guard, MySQL roles (`admin_role`, `pi_role`, `grant_officer_role`, `student_role`) |
-
-Planned workflows: **W1** award a grant (multi-table transaction), **W2** submit and approve an expense (integrity via triggers and a transaction), **W3** discover and report (full-text matching, views, CTEs).
-
----
-
-## Repository layout
+## Project Structure
 
 ```
-DBMS-Project/
-  README.md
-  docs/images/               diagram images
-  schema/
-    01_schema_er.sql         tables, keys, constraints
-    02_views_indexes.sql     views and index strategy
-    03_triggers_integrity.sql
-    04_rbac.sql              roles, GRANT, REVOKE
-    05_stored_procs_events.sql
-    06_seed_data.sql
-  server/                    Express API
-  src/                       React client
+uni-grant/
+├── index.html                         # HTML entry point
+├── UniGrant.jsx                       # Root re-export (build compat shim)
+├── api.js                             # Role 4: REST API service layer
+├── schema/
+│   ├── 01_schema_er.sql               # Role 1: All CREATE TABLE + ER design
+│   ├── 02_views_indexes.sql           # Role 2: Views + index strategy
+│   ├── 03_triggers_integrity.sql      # Role 3: Triggers + ACID transactions
+│   ├── 04_rbac.sql                    # Role 5: GRANT/REVOKE + roles
+│   ├── 05_stored_procs_events.sql     # Role 7: Stored procs + events + backup
+│   └── 06_seed_data.sql               # Role 1: Sample data
+└── src/
+    ├── App.jsx                        # Role 6: Root component
+    ├── auth.js                        # Role 5: Authentication + NAV config
+    ├── analytics.js                   # Role 7: Analytics computation helpers
+    ├── database.js                    # Role 4: Mock DB + SQL audit log
+    ├── styles.js                      # Role 6: Global CSS
+    ├── utils.js                       # Role 4: Formatting utilities
+    └── components/
+        ├── ui.jsx                     # Role 6: Shared primitives (Badge, Modal…)
+        ├── Login.jsx                  # Role 5: Authentication screen
+        ├── Sidebar.jsx                # Role 6: Role-filtered navigation
+        ├── Dashboard.jsx              # Role 6: KPI overview per role
+        ├── ProposalsModule.jsx        # Role 6+3: Proposal CRUD + triggers
+        ├── ProjectsModule.jsx         # Role 6: Project detail + budget/team
+        ├── ExpenseModule.jsx          # Role 3: ACID expense approval
+        ├── MilestonesModule.jsx       # Role 6: Milestone tracker
+        ├── OutputsModule.jsx          # Role 6: Publications & patents
+        ├── GrantsModule.jsx           # Role 6: Grant listing
+        ├── AIGrantMatcher.jsx         # Role 6+2: Full-text search + matching
+        ├── DBAConsole.jsx             # Role 2: Views/triggers/indexes viewer
+        ├── Analytics.jsx              # Role 7: Cross-dept analytics dashboard
+        ├── UsersModule.jsx            # Role 5: User + RBAC management
+        └── DepartmentsModule.jsx      # Role 6: Department overview
 ```
 
-## Setup (database)
+---
 
+## Role Contributions
+
+### Role 1 — Database Schema & ER Modeling Engineer
+**Files:** `schema/01_schema_er.sql`, `schema/06_seed_data.sql`
+
+Designed the full Entity-Relationship model for UniGrant:
+
+- **Strong entities:** `Department`, `User`, `FundingAgency`, `ExternalCall`, `Proposal`, `Grant_`, `Project`, `BudgetHead`, `Expense`, `Milestone`, `ResearchOutput`, `Notification`
+- **Weak entities:** `Dependent` (partial key: `user_id + dependent_name`), `PublicationAuthor`, `Equipment`
+- **M:N relationships:** `WORKS_ON` (User ↔ Project), `SUPERVISES` (User ↔ User, self-referential), `MATCHES` (ExternalCall ↔ User)
+- ISA (specialisation) hierarchy for `User` → `{Admin, PI, Student, Grant_Officer}` implemented as single-table inheritance via `role` ENUM
+- `BudgetHead.remaining_balance` is a `GENERATED ALWAYS AS` computed column to prevent update anomalies
+- All FK relationships include `ON DELETE` actions (CASCADE, RESTRICT, SET NULL) chosen based on entity dependency
+
+Key design decisions:
+- `Grant_` is named with underscore because `GRANT` is a reserved SQL keyword
+- `remaining_balance` uses `STORED` (materialised) rather than `VIRTUAL` for index support
+- CHECK constraints enforce domain integrity at the DB level independently of application code
+
+---
+
+### Role 2 — SQL & Query Optimization Engineer
+**Files:** `schema/02_views_indexes.sql`, `src/components/DBAConsole.jsx`
+
+Designed the three-tier view architecture and full index strategy:
+
+**Views:**
+| View | Purpose | Visible To |
+|------|---------|------------|
+| `Public_Project_View` | Hides all financial data | Students, Public |
+| `PI_Dashboard_View` | Personalised per-PI summary with aggregates | PI |
+| `Admin_Analytics_View` | Cross-department GROUP BY aggregation | Admin |
+| `Student_Project_View` | Row-level filtered (WORKS_ON join) | Student |
+
+**Indexes:**
+
+| Index | Type | Columns | Query Pattern |
+|-------|------|---------|---------------|
+| `IDX_Project_Title_Status` | B-tree composite | `project_title, status` | Dashboard status filter |
+| `IDX_User_Name` | B-tree composite | `last_name, first_name` | Name lookup |
+| `IDX_Expense_Date_Project` | B-tree composite | `date, project_id` | Timeline queries |
+| `IDX_Milestone_Status_DueDate` | B-tree composite | `status, due_date` | 30-day alert event |
+| `FT_Proposal` | FULLTEXT inverted | `abstract, title` | AI proposal search |
+| `FT_User_Specialization` | FULLTEXT inverted | `specialization` | Grant matching |
+
+The `DBAConsole.jsx` component exposes all views, triggers, stored procedures, and the index strategy to the Admin user in the live UI.
+
+---
+
+### Role 3 — Transaction, Concurrency & Integrity Engineer
+**Files:** `schema/03_triggers_integrity.sql`, `src/components/ExpenseModule.jsx`
+
+Implemented all triggers and ACID transaction logic:
+
+**Triggers:**
+
+| Trigger | Event | Purpose |
+|---------|-------|---------|
+| `balance_check_before_expense` | `BEFORE INSERT ON Expense` | Blocks overspend; `SIGNAL SQLSTATE '45000'` |
+| `update_budget_on_approval` | `AFTER UPDATE ON Expense` | Atomically updates `BudgetHead.spent_amount` |
+| `active_project_limit_pi` | `BEFORE INSERT ON Proposal` | Enforces max 5 active projects per PI |
+| `auto_close_project` | `AFTER UPDATE ON Project` | Closes project when `end_date` passes |
+| `prevent_duplicate_expense_receipt` | `BEFORE INSERT ON Expense` | Blocks duplicate receipt references |
+
+**ACID demonstration in `ExpenseModule.jsx`:**
+- **Atomicity** — `Expense INSERT` + `BudgetHead UPDATE` wrapped in one transaction
+- **Consistency** — Trigger fires before insert to validate balance
+- **Isolation** — `SELECT FOR UPDATE` pattern documented for concurrent approvals
+- **Durability** — Committed changes persist across component re-renders
+
+The Expense Approvals UI fires these triggers live and displays the SQL in the Audit Console.
+
+---
+
+### Role 4 — Backend API & DB Integration Engineer
+**Files:** `api.js`, `src/database.js`, `src/utils.js`
+
+Built two layers of backend integration:
+
+**`api.js` — REST API service layer:**
+- Full CRUD endpoints for all entities (Users, Projects, Expenses, Grants, etc.)
+- JWT Bearer token authentication (`Authorization: Bearer <token>`)
+- Automatic 401 interception with session cleanup
+- Query string builder for filter parameters
+- Maps to real backend routes: `POST /auth/login`, `GET /projects`, `PATCH /expenses/:id/status`, etc.
+
+**`src/database.js` — In-memory mock DB:**
+- Mirrors the MySQL schema in JavaScript for the demo frontend
+- All mutations also call `logSQL()` to show the equivalent SQL in the Audit Console
+- Shared mutable object — all component imports reference the same DB state
+
+**`src/utils.js` — Formatting helpers:**
+- `inr(n)` → mirrors `FORMAT(n, 2)` with Indian locale (`₹1,23,456`)
+- `fmtDate(d)` → mirrors `DATE_FORMAT(d, '%d %b %Y')`
+- `daysUntil(d)` → mirrors `DATEDIFF(d, CURDATE())`
+
+---
+
+### Role 5 — Authentication & Role-Based Access Engineer
+**Files:** `schema/04_rbac.sql`, `src/auth.js`, `src/components/Login.jsx`, `src/components/UsersModule.jsx`
+
+Implemented the full RBAC system:
+
+**MySQL roles and privilege matrix:**
+
+| Role | Tables | Privileges |
+|------|--------|------------|
+| `admin_role` | All | ALL + CREATE USER + GRANT OPTION |
+| `pi_role` | Proposal, Expense, Milestone, ResearchOutput | SELECT, INSERT, UPDATE |
+| `grant_officer_role` | Proposal (R), Expense (RU) | SELECT only on Proposal; UPDATE on Expense |
+| `student_role` | Views only | SELECT on Public/Student views |
+
+`REVOKE CREATE USER ON *.* FROM grant_officer_role` is explicitly shown in the UI.
+
+**`src/auth.js`:**
+- `authenticateUser(email, password)` — simulates `SELECT ... WHERE SHA2(password,256) = password_hash`
+- `NAV` config — each role's navigation items are filtered to match their SQL GRANT permissions
+- `ROLE_COLORS` — visual differentiation per role in the sidebar
+
+**`src/components/Login.jsx`:**
+- Demo account quick-fill for all 4 roles
+- 700ms simulated auth latency (production: POST `/auth/login` via `api.js`)
+
+---
+
+### Role 6 — Frontend & DB Interaction Engineer
+**Files:** `src/styles.js`, `src/App.jsx`, and all `src/components/*.jsx` not owned by other roles
+
+Built the entire React frontend that visually represents the database:
+
+**Component → DB entity mapping:**
+
+| Component | DB Entity/View |
+|-----------|---------------|
+| `Dashboard.jsx` | `PI_Dashboard_View`, `Admin_Analytics_View` |
+| `ProposalsModule.jsx` | `Proposal` table + `active_project_limit_pi` trigger |
+| `ProjectsModule.jsx` | `Project` + `BudgetHead` + `WORKS_ON` |
+| `ExpenseModule.jsx` | `Expense` + ACID transactions |
+| `MilestonesModule.jsx` | `Milestone` + 30-day alert event |
+| `OutputsModule.jsx` | `ResearchOutput` + `PublicationAuthor` |
+| `GrantsModule.jsx` | `Grant_` table |
+| `AIGrantMatcher.jsx` | `MATCHES` table + `FT_User_Specialization` FULLTEXT |
+| `DepartmentsModule.jsx` | `Department` + aggregated joins |
+
+**Design system** (`src/styles.js`):
+- Palette: deep navy (`#0c1a2e`) + warm gold (`#c9a84c`) — institutional aesthetic
+- Typography: DM Serif Display (headings) + DM Sans (body)
+- `Badge` component renders all SQL ENUM values with colour coding
+
+**SQL Audit Console** (`ui.jsx → SQLConsole`):
+- Shows the last 5 SQL queries executed by any module
+- Auto-refreshes every 1.5 seconds via `setInterval` in `App.jsx`
+- Mimics MySQL's `general_log` output format
+
+---
+
+### Role 7 — Backup, Recovery & Analytics Engineer
+**Files:** `schema/05_stored_procs_events.sql`, `src/analytics.js`, `src/components/Analytics.jsx`
+
+Built the analytics layer and database maintenance system:
+
+**Stored Procedures:**
+
+| Procedure | Parameters | Description |
+|-----------|-----------|-------------|
+| `generate_annual_report` | `dept_id INT` | Full funding/output/student report for a department |
+| `get_pi_budget_summary` | `pi_id INT` | Budget utilisation per category per PI |
+
+**Scheduled Events:**
+
+| Event | Schedule | Action |
+|-------|----------|--------|
+| `milestone_30day_alert` | Daily | Inserts `Notification` rows for due milestones |
+| `monthly_budget_snapshot` | 1st of month | Archives `BudgetHead` balances to `BudgetSnapshot` |
+| `grant_closure_check` | Daily | Auto-closes expired active grants |
+
+**`src/analytics.js` — JS mirror of SQL aggregations:**
+- `getUniversityKPIs()` → mirrors `SELECT COUNT(*), SUM() FROM Admin_Analytics_View`
+- `getDepartmentFundingStats()` → mirrors `GROUP BY d.dept_id`
+- `getExpenseCategoryStats()` → mirrors `GROUP BY bh.category`
+- `generateAnnualReport(deptId)` → mirrors `CALL generate_annual_report(dept_id)`
+
+**Backup strategy (documented in `05_stored_procs_events.sql`):**
+- Nightly `mysqldump --single-transaction --routines --triggers --events`
+- Incremental via MySQL binary log (`binlog_format = ROW`)
+- Point-in-time recovery via `mysqlbinlog --start-datetime ... --stop-datetime`
+- Primary-Replica replication setup for HA
+
+---
+
+## How to Run
+
+### Frontend (React)
 ```bash
-mysql -u root -p < schema/01_schema_er.sql
-mysql -u root -p < schema/02_views_indexes.sql
-mysql -u root -p < schema/03_triggers_integrity.sql
-mysql -u root -p < schema/04_rbac.sql
-mysql -u root -p < schema/05_stored_procs_events.sql
-mysql -u root -p < schema/06_seed_data.sql
+# Install dependencies (Vite + React)
+npm create vite@latest . -- --template react
+npm install
+
+# Start dev server
+npm run dev
 ```
-
-
-## Setup and Execution Guide
 
 ### Database Setup
 ```bash
+# Run schema files in order
 mysql -u root -p < schema/01_schema_er.sql
 mysql -u root -p < schema/02_views_indexes.sql
 mysql -u root -p < schema/03_triggers_integrity.sql
@@ -236,15 +282,28 @@ mysql -u root -p < schema/05_stored_procs_events.sql
 mysql -u root -p < schema/06_seed_data.sql
 ```
 
-### Backend Setup
-```bash
-cd server
-npm install
-npm run dev
-```
+### Demo Accounts (frontend mock)
 
-### Frontend Setup
-```bash
-npm install
-npm run dev
-```
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | priya@university.edu | admin123 |
+| PI | arjun@university.edu | pi123 |
+| PI | vikram@university.edu | pi456 |
+| Student | rahul@university.edu | student123 |
+| Grant Officer | sneha@university.edu | go123 |
+
+---
+
+## Key Features Demonstrated
+
+| Feature | Where to see it |
+|---------|----------------|
+| RBAC with MySQL roles | Login as different users; DBA Console → Roles tab |
+| ACID expense approval | Login as Grant Officer → Expense Approvals → Approve |
+| Trigger: balance check | Login as PI → Add Expense → Enter amount > available balance |
+| Trigger: project limit | Login as PI → New Proposal (if 5 active projects exist) |
+| Stored procedure | Login as Admin → DBA Console → Stored Proc → Execute |
+| Views (3-tier) | DBA Console → Views tab |
+| Full-text search | AI Grant Matcher → Semantic Search |
+| Analytics dashboard | Login as Admin → Analytics |
+| SQL Audit Console | Bottom of every page — shows live queries |
