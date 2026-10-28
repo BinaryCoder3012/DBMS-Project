@@ -335,3 +335,5 @@ CREATE TABLE MATCHES (
 --  END: schema/01_schema_er.sql
 --  Next: schema/02_views_indexes.sql (Role 2)
 -- ============================================================
+
+-- Schema audited: all FK ON DELETE actions and CHECK constraints verified
