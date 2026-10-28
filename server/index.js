@@ -31,8 +31,6 @@ const pool = mysql.createPool({
   database:         process.env.DB_NAME || "unigrant",
   waitForConnections: true,
   connectionLimit:  10,
-  enableKeepAlive:  true,
-  keepAliveInitialDelay: 10000,
 });
 
 // ── Health check ──────────────────────────────────────────────────────────────
