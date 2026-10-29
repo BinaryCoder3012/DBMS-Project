@@ -18,6 +18,7 @@ __MACOSX/
 Thumbs.db
 .claude/
 *.pdf
+!docs/**/*.pdf
 
 # Local working directories & automation scripts
 uni grant/
