@@ -95,20 +95,19 @@ END //
 
 -- ════════════════════════════════════════════════════════════
 --  TRIGGER 4: auto_close_project
---  Type:    AFTER UPDATE on Project
+--  Type:    BEFORE UPDATE on Project
 --  Purpose: Automatically set project status to 'Closed' when
 --           end_date has passed and status is still 'Active'.
---  Note:    In production, this fires on any UPDATE — combine with
---           the milestone_30day_alert EVENT for scheduled checks.
+--  Note:    Must be BEFORE UPDATE and assign NEW.status. A trigger may
+--           not run UPDATE on its own table (MySQL error 1442), so an
+--           AFTER UPDATE version aborts the statement that fired it.
 -- ════════════════════════════════════════════════════════════
 CREATE TRIGGER auto_close_project
-AFTER UPDATE ON Project
+BEFORE UPDATE ON Project
 FOR EACH ROW
 BEGIN
   IF CURDATE() > NEW.end_date AND NEW.status = 'Active' THEN
-    UPDATE Project
-    SET status = 'Closed'
-    WHERE project_id = NEW.project_id;
+    SET NEW.status = 'Closed';
   END IF;
 END //
 
