@@ -216,7 +216,7 @@ DELIMITER ;
 -- Grant_:    chk_grant_amount      → total_amount_awarded > 0
 -- Project:   chk_project_dates     → end_date > start_date
 -- Project:   chk_project_balance   → current_balance >= 0
--- BudgetHead:chk_budget_amounts    → allocated_amount > 0 AND spent_amount >= 0
+-- BudgetHead:chk_budget_amounts    → allocated_amount > 0 AND 0 <= spent_amount <= allocated_amount
 -- Expense:   chk_expense_amount    → amount > 0
 -- MATCHES:   (inline)              → match_score BETWEEN 0 AND 100
 -- SUPERVISES:chk_no_self_supervise → supervisor_id != supervisee_id

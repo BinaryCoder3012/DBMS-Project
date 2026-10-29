@@ -170,7 +170,10 @@ CREATE TABLE BudgetHead (
   fiscal_year       YEAR,
   PRIMARY KEY (budgethead_id),
   FOREIGN KEY (project_id) REFERENCES Project(project_id) ON DELETE CASCADE,
-  CONSTRAINT chk_budget_amounts CHECK (allocated_amount > 0 AND spent_amount >= 0)
+  -- spent <= allocated is the last line of defence for BR1: two pending
+  -- expenses can each pass the insert trigger and still overspend together.
+  CONSTRAINT chk_budget_amounts CHECK (allocated_amount > 0 AND spent_amount >= 0
+                                       AND spent_amount <= allocated_amount)
 );
 
 -- ── Expense ───────────────────────────────────────────────────
