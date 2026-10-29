@@ -60,6 +60,11 @@ BEGIN
     UPDATE BudgetHead
     SET spent_amount = spent_amount + NEW.amount
     WHERE budgethead_id = NEW.budgethead_id;
+
+    -- D2: Project.current_balance is a cached roll-up of the head balances
+    UPDATE Project
+    SET current_balance = current_balance - NEW.amount
+    WHERE project_id = NEW.project_id;
   END IF;
 
   -- Reversal: if an approved expense is rejected (e.g., audit correction)
@@ -67,6 +72,10 @@ BEGIN
     UPDATE BudgetHead
     SET spent_amount = spent_amount - NEW.amount
     WHERE budgethead_id = NEW.budgethead_id;
+
+    UPDATE Project
+    SET current_balance = current_balance + NEW.amount
+    WHERE project_id = NEW.project_id;
   END IF;
 END //
 
