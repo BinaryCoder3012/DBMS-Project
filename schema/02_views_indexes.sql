@@ -16,15 +16,16 @@ USE unigrant;
 --  VIEWS
 --  Three-tier access model:
 --    ① Public_Project_View  — hides ALL financial data
---    ② PI_Dashboard_View    — personalised per-user view
+--    ② PI_Dashboard_View    — per-project summary, filtered by pi_id
 --    ③ Admin_Analytics_View — cross-department aggregation
---    ④ Student_Project_View — row-level filtered view
+--    ④ Student_Project_View — assignments only, no money columns
 -- ════════════════════════════════════════════════════════════
 
 -- ── ① Public_Project_View ────────────────────────────────────
 -- Purpose: External stakeholders / student read access.
 -- Security: No financial columns (current_balance, stipend, salaries).
 -- Used by: student_role (GRANT SELECT ON Public_Project_View)
+-- LEFT JOINs keep projects that have no grant or department yet.
 CREATE OR REPLACE VIEW Public_Project_View AS
 SELECT
   p.project_id,
@@ -36,65 +37,103 @@ SELECT
   p.end_date,
   p.status
 FROM Project p
-JOIN User        u ON p.pi_id        = u.user_id
-JOIN Department  d ON p.department_id = d.dept_id
-JOIN Grant_      g ON p.grant_id      = g.grant_id;
+JOIN      User        u ON p.pi_id         = u.user_id
+LEFT JOIN Department  d ON p.department_id = d.dept_id
+LEFT JOIN Grant_      g ON p.grant_id      = g.grant_id;
 -- INTENTIONALLY OMITTED: current_balance, stipend_amount, salary, budget_heads
 
 -- ── ② PI_Dashboard_View ──────────────────────────────────────
--- Purpose: Real-time summary for a PI's own projects only.
--- Row-level security: WHERE pi_id = CURRENT_USER() identity.
--- Aggregates: pending milestones, budget utilisation %, team size.
+-- Purpose: Per-project summary for PIs; the API adds WHERE pi_id = ?.
+-- Each aggregate comes from its own correlated subquery. Joining Milestone,
+-- BudgetHead and WORKS_ON in one FROM clause would multiply the rows and
+-- inflate every SUM and COUNT (join fan-out).
 CREATE OR REPLACE VIEW PI_Dashboard_View AS
 SELECT
+  p.pi_id,
   p.project_id,
   p.project_title,
+  p.status,
   p.current_balance,
-  COUNT(CASE WHEN m.status = 'Pending' THEN 1 END)                AS pending_milestones,
-  ROUND(SUM(bh.spent_amount) / NULLIF(SUM(bh.allocated_amount),0) * 100, 1)
-                                                                   AS budget_utilisation_pct,
-  COUNT(DISTINCT wo.user_id)                                       AS team_size,
+  (SELECT COUNT(*) FROM Milestone m
+    WHERE m.project_id = p.project_id AND m.status = 'Pending')     AS pending_milestones,
+  (SELECT ROUND(SUM(bh.spent_amount) / NULLIF(SUM(bh.allocated_amount), 0) * 100, 1)
+     FROM BudgetHead bh WHERE bh.project_id = p.project_id)         AS budget_utilisation_pct,
+  (SELECT COUNT(*) FROM WORKS_ON wo
+    WHERE wo.project_id = p.project_id)                             AS team_size,
   g.funding_agency
-FROM Project     p
-JOIN Milestone   m  ON p.project_id = m.project_id
-JOIN BudgetHead  bh ON p.project_id = bh.project_id
-JOIN WORKS_ON    wo ON p.project_id = wo.project_id
-JOIN Grant_      g  ON p.grant_id   = g.grant_id
-WHERE p.pi_id = (SELECT user_id FROM User WHERE email = CURRENT_USER())
-GROUP BY p.project_id, p.project_title, p.current_balance, g.funding_agency;
+FROM Project p
+LEFT JOIN Grant_ g ON p.grant_id = g.grant_id;
 
 -- ── ③ Admin_Analytics_View ───────────────────────────────────
 -- Purpose: Aggregated cross-department statistics for Admin dashboard.
--- Materialization note: In production, use CREATE TABLE ... SELECT or
---   event-driven refresh to avoid re-computing JOINs on every access.
+-- Every measure is pre-aggregated per department in its own derived table,
+-- so a project with many outputs or team members is not counted repeatedly.
+-- DISTINCT in the funding subquery counts a grant once even when it funds
+-- several projects in the department (assumption A2).
 CREATE OR REPLACE VIEW Admin_Analytics_View AS
 SELECT
   d.dept_id,
   d.dept_name,
-  IFNULL(SUM(g.total_amount_awarded), 0)                              AS total_funding,
-  COUNT(DISTINCT p.project_id)                                        AS total_projects,
-  SUM(CASE WHEN p.status = 'Active'      THEN 1 ELSE 0 END)          AS active_projects,
-  COUNT(DISTINCT ro.output_id)                                        AS total_research_outputs,
-  SUM(CASE WHEN ro.type  = 'Publication' THEN 1 ELSE 0 END)          AS publications,
-  SUM(CASE WHEN ro.type  = 'Patent'      THEN 1 ELSE 0 END)          AS patents,
-  COUNT(DISTINCT CASE WHEN u.role = 'Student' THEN u.user_id END)    AS students_supported
-FROM Department  d
-LEFT JOIN Project        p  ON d.dept_id    = p.department_id
-LEFT JOIN Grant_         g  ON p.grant_id   = g.grant_id
-LEFT JOIN ResearchOutput ro ON p.project_id = ro.project_id
-LEFT JOIN WORKS_ON       wo ON p.project_id = wo.project_id
-LEFT JOIN User           u  ON wo.user_id   = u.user_id
-GROUP BY d.dept_id, d.dept_name;
+  IFNULL(fund.total_funding, 0)            AS total_funding,
+  IFNULL(proj.total_projects, 0)           AS total_projects,
+  IFNULL(proj.active_projects, 0)          AS active_projects,
+  IFNULL(proj.completed_projects, 0)       AS completed_projects,
+  IFNULL(outp.total_research_outputs, 0)   AS total_research_outputs,
+  IFNULL(outp.publications, 0)             AS publications,
+  IFNULL(outp.patents, 0)                  AS patents,
+  IFNULL(stud.students_supported, 0)       AS students_supported
+FROM Department d
+LEFT JOIN (
+  SELECT department_id,
+         COUNT(*)                                              AS total_projects,
+         SUM(CASE WHEN status = 'Active'    THEN 1 ELSE 0 END) AS active_projects,
+         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_projects
+  FROM Project GROUP BY department_id
+) proj ON proj.department_id = d.dept_id
+LEFT JOIN (
+  SELECT department_id, SUM(total_amount_awarded) AS total_funding
+  FROM (SELECT DISTINCT p.department_id, g.grant_id, g.total_amount_awarded
+        FROM Project p JOIN Grant_ g ON p.grant_id = g.grant_id) dg
+  GROUP BY department_id
+) fund ON fund.department_id = d.dept_id
+LEFT JOIN (
+  SELECT p.department_id,
+         COUNT(*)                                                 AS total_research_outputs,
+         SUM(CASE WHEN ro.type = 'Publication' THEN 1 ELSE 0 END) AS publications,
+         SUM(CASE WHEN ro.type = 'Patent'      THEN 1 ELSE 0 END) AS patents
+  FROM ResearchOutput ro JOIN Project p ON ro.project_id = p.project_id
+  GROUP BY p.department_id
+) outp ON outp.department_id = d.dept_id
+LEFT JOIN (
+  SELECT p.department_id, COUNT(DISTINCT wo.user_id) AS students_supported
+  FROM WORKS_ON wo
+  JOIN Project p ON wo.project_id = p.project_id
+  JOIN User    u ON wo.user_id    = u.user_id AND u.role = 'Student'
+  GROUP BY p.department_id
+) stud ON stud.department_id = d.dept_id;
 
--- ── ④ Student_Project_View (row-level security) ───────────────
--- Purpose: Students only see projects they are assigned to via WORKS_ON.
--- This enforces row-level security without a policy engine.
+-- ── ④ Student_Project_View ───────────────────────────────────
+-- Purpose: A student's assigned projects with no financial columns (BR6).
+-- One row per assignment; the API adds WHERE student_id = ?. The application
+-- connects through a shared pool, so CURRENT_USER() cannot identify a person,
+-- which is why the view exposes the key to filter on (assumption A5).
 -- GRANT SELECT ON Student_Project_View TO student_role;
 CREATE OR REPLACE VIEW Student_Project_View AS
-  SELECT p.*
-  FROM Project p
-  JOIN WORKS_ON wo ON p.project_id = wo.project_id
-  WHERE wo.user_id = (SELECT user_id FROM User WHERE email = CURRENT_USER());
+SELECT
+  wo.user_id AS student_id,
+  p.project_id,
+  p.project_title,
+  p.description,
+  p.start_date,
+  p.end_date,
+  p.status,
+  p.department_id,
+  p.pi_id,
+  wo.role_in_project,
+  wo.hours_per_week
+FROM Project p
+JOIN WORKS_ON wo ON p.project_id = wo.project_id;
+-- INTENTIONALLY OMITTED: current_balance, grant_id, stipend_amount
 
 -- ════════════════════════════════════════════════════════════
 --  INDEX STRATEGY
