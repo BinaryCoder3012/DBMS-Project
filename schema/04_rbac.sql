@@ -56,17 +56,20 @@ GRANT SELECT                 ON unigrant.BudgetHead     TO pi_role;
 GRANT SELECT                 ON unigrant.Grant_         TO pi_role;
 -- Dashboard view
 GRANT SELECT                 ON unigrant.PI_Dashboard_View TO pi_role;
+GRANT SELECT                 ON unigrant.Public_Project_View TO pi_role;
 
 -- ════════════════════════════════════════════════════════════
 --  ③ GRANT OFFICER ROLE — Finance Approval
---  Can view proposals and approve/reject expenses.
+--  Reviews proposals, awards grants (W1) and approves or rejects expenses.
+--  Project and BudgetHead rows are created only as part of an award.
 --  Explicitly BLOCKED from creating users or modifying schema.
 -- ════════════════════════════════════════════════════════════
-GRANT SELECT         ON unigrant.Proposal TO grant_officer_role;
-GRANT SELECT, UPDATE ON unigrant.Expense  TO grant_officer_role;
-GRANT SELECT         ON unigrant.Grant_   TO grant_officer_role;
-GRANT SELECT         ON unigrant.Project  TO grant_officer_role;
-GRANT SELECT         ON unigrant.BudgetHead TO grant_officer_role;
+GRANT SELECT, UPDATE (status) ON unigrant.Proposal   TO grant_officer_role;
+GRANT SELECT, UPDATE          ON unigrant.Expense    TO grant_officer_role;
+GRANT SELECT, INSERT          ON unigrant.Grant_     TO grant_officer_role;
+GRANT SELECT, INSERT          ON unigrant.Project    TO grant_officer_role;
+GRANT SELECT, INSERT          ON unigrant.BudgetHead TO grant_officer_role;
+GRANT SELECT                  ON unigrant.Public_Project_View TO grant_officer_role;
 
 -- Explicitly revoke dangerous privilege (even if inherited from default)
 REVOKE CREATE USER ON *.* FROM grant_officer_role;
@@ -106,35 +109,37 @@ SET DEFAULT ROLE ALL TO
 -- ════════════════════════════════════════════════════════════
 --  PRIVILEGE MATRIX SUMMARY
 -- ════════════════════════════════════════════════════════════
--- Table/View           | Admin | PI | Grant Officer | Student
--- ─────────────────────┼───────┼────┼───────────────┼────────
--- User                 |  ALL  |  — |      —        |   —
--- Department           |  ALL  |  — |      —        |   —
--- Proposal             |  ALL  | RW |      R        |   —
--- Grant_               |  ALL  |  R |      R        |   —
--- Project              |  ALL  |  R |      R        |   —
--- BudgetHead           |  ALL  |  R |      R        |   —
--- Expense              |  ALL  | RI |     RU        |   —
--- Milestone            |  ALL  | RIU|      —        |   —
--- ResearchOutput       |  ALL  | RI |      —        |   —
--- Public_Project_View  |  ALL  |  R |      R        |   R
--- PI_Dashboard_View    |  ALL  |  R |      —        |   —
--- Admin_Analytics_View |  ALL  |  — |      —        |   —
--- Student_Project_View |  ALL  |  — |      —        |   R
--- ─────────────────────┴───────┴────┴───────────────┴────────
--- R=SELECT, I=INSERT, U=UPDATE, W=DELETE, ALL=all privileges
+-- Table/View           | Admin | PI  | Grant Officer | Student
+-- ─────────────────────┼───────┼─────┼───────────────┼────────
+-- User                 |  ALL  |  —  |      —        |   —
+-- Department           |  ALL  |  —  |      —        |   —
+-- Proposal             |  ALL  | SIU | S, U(status)  |   —
+-- Grant_               |  ALL  |  S  |     SI        |   —
+-- Project              |  ALL  |  S  |     SI        |   —
+-- BudgetHead           |  ALL  |  S  |     SI        |   —
+-- Expense              |  ALL  | SI  |     SU        |   —
+-- Milestone            |  ALL  | SIU |      —        |   —
+-- ResearchOutput       |  ALL  | SI  |      —        |   —
+-- Public_Project_View  |  ALL  |  S  |      S        |   S
+-- PI_Dashboard_View    |  ALL  |  S  |      —        |   —
+-- Admin_Analytics_View |  ALL  |  —  |      —        |   —
+-- Student_Project_View |  ALL  |  —  |      —        |   S
+-- ─────────────────────┴───────┴─────┴───────────────┴────────
+-- S=SELECT, I=INSERT, U=UPDATE, ALL=all privileges
 
 -- ════════════════════════════════════════════════════════════
 --  ROW-LEVEL SECURITY NOTES
 -- ════════════════════════════════════════════════════════════
 -- MySQL 8.0 does not have native row-level security policies (unlike PostgreSQL).
 -- We enforce row-level restrictions via:
---   1. View WHERE clauses (Student_Project_View, PI_Dashboard_View)
---   2. Application-layer filtering (api.js JWT claims → WHERE pi_id = current_user)
---   3. CURRENT_USER() in view definitions for identity-based filtering
+--   1. Views that leave out restricted columns and expose the row owner
+--      (Student_Project_View.student_id, PI_Dashboard_View.pi_id)
+--   2. The API role guard (server/index.js): the signed session token gives
+--      the caller's id, and every query adds WHERE pi_id = ? or student_id = ?
 --
--- For production, consider using MySQL's SECURITY DEFINER views or
--- a connection-per-user pooling strategy to enforce row isolation.
+-- The API uses one pooled service account, so these GRANTs apply to direct
+-- database clients (admin_user, pi_user, grant_officer_user, student_user).
+-- The role guard mirrors them for requests that arrive through the API.
 
 -- ============================================================
 --  END: schema/04_rbac.sql
