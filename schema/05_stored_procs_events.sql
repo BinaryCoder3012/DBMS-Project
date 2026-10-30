@@ -22,7 +22,7 @@ DELIMITER //
 --  Purpose: Generate a comprehensive annual report for a given
 --           department — funding received, projects, outputs,
 --           students supported, and budget utilisation %.
---  Caller:  Admin via DBAConsole.jsx → Analytics.jsx
+--  Caller:  GET /api/reports/department/:id (DBA console)
 --  SQL:     CALL generate_annual_report(dept_id);
 -- ════════════════════════════════════════════════════════════
 CREATE PROCEDURE generate_annual_report(IN p_dept_id INT)
@@ -38,34 +38,30 @@ BEGIN
     SET MESSAGE_TEXT = 'ERR-DEPT001: Department not found';
   END IF;
 
-  -- Main report query
+  -- Reuses Admin_Analytics_View, whose measures are pre-aggregated per
+  -- department. Expenditure is a separate subquery for the same reason:
+  -- joining Expense to the other tables would multiply the rows.
   SELECT
-    d.dept_name,
-    YEAR(CURDATE())                                                       AS report_year,
-    IFNULL(SUM(g.total_amount_awarded), 0)                               AS total_funds_received,
-    COUNT(DISTINCT p.project_id)                                         AS total_projects,
-    SUM(CASE WHEN p.status = 'Active'     THEN 1 ELSE 0 END)            AS active_projects,
-    SUM(CASE WHEN p.status = 'Completed'  THEN 1 ELSE 0 END)            AS completed_projects,
-    IFNULL(COUNT(DISTINCT ro.output_id), 0)                              AS total_research_outputs,
-    SUM(CASE WHEN ro.type  = 'Publication' THEN 1 ELSE 0 END)           AS publications,
-    SUM(CASE WHEN ro.type  = 'Patent'      THEN 1 ELSE 0 END)           AS patents,
-    COUNT(DISTINCT CASE WHEN u.role = 'Student' THEN u.user_id END)     AS students_supported,
-    IFNULL(SUM(e.amount), 0)                                             AS total_expenditure,
-    ROUND(
-      IFNULL(SUM(e.amount), 0) /
-      NULLIF(SUM(g.total_amount_awarded), 0) * 100,
-      2
-    )                                                                    AS budget_utilisation_pct
-  FROM Department d
-  LEFT JOIN Project        p  ON d.dept_id    = p.department_id
-  LEFT JOIN Grant_         g  ON p.grant_id   = g.grant_id
-  LEFT JOIN ResearchOutput ro ON p.project_id = ro.project_id
-  LEFT JOIN WORKS_ON       wo ON p.project_id = wo.project_id
-  LEFT JOIN User           u  ON wo.user_id   = u.user_id
-  LEFT JOIN Expense        e  ON p.project_id = e.project_id
-                              AND e.status    = 'Approved'
-  WHERE d.dept_id = p_dept_id
-  GROUP BY d.dept_id, d.dept_name;
+    a.dept_name,
+    YEAR(CURDATE())           AS report_year,
+    a.total_funding           AS total_funds_received,
+    a.total_projects,
+    a.active_projects,
+    a.completed_projects,
+    a.total_research_outputs,
+    a.publications,
+    a.patents,
+    a.students_supported,
+    x.total_expenditure,
+    ROUND(x.total_expenditure / NULLIF(a.total_funding, 0) * 100, 2) AS budget_utilisation_pct
+  FROM Admin_Analytics_View a
+  CROSS JOIN (
+    SELECT IFNULL(SUM(e.amount), 0) AS total_expenditure
+    FROM Expense e
+    JOIN Project p ON e.project_id = p.project_id
+    WHERE p.department_id = p_dept_id AND e.status = 'Approved'
+  ) x
+  WHERE a.dept_id = p_dept_id;
 END //
 
 -- ════════════════════════════════════════════════════════════
@@ -96,7 +92,7 @@ DELIMITER ;
 --  Schedule: Daily at midnight
 --  Purpose:  Insert a Notification row for PIs whose milestones
 --            are due in exactly 30 days (mirrors the 30-day
---            urgency colouring in MilestonesModule.jsx).
+--            urgency colouring on the Milestones screen).
 -- ════════════════════════════════════════════════════════════
 CREATE EVENT IF NOT EXISTS milestone_30day_alert
 ON SCHEDULE EVERY 1 DAY
