@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Triggers, Constraints & Transaction Integrity
---  Role 3: Transaction, Concurrency & Integrity Engineer
+--  Owner: Chaitrali Shrikant Dharmadhikari
 -- ============================================================
 --  Responsibilities:
 --    • Define all BEFORE/AFTER triggers with SIGNAL error handling
@@ -223,5 +223,5 @@ DELIMITER ;
 
 -- ============================================================
 --  END: schema/03_triggers_integrity.sql
---  Next: schema/04_rbac.sql (Role 5)
+--  Next: schema/04_rbac.sql
 -- ============================================================

@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Schema & ER Modeling
---  Role 1: Database Schema & ER Modeling Engineer
+--  Owner: Lakshya Sachdeva
 -- ============================================================
 --  Responsibilities:
 --    • Design ER diagram (entities, relationships, cardinalities)
@@ -52,7 +52,7 @@ CREATE TABLE User (
   address          TEXT,
   date_of_birth    DATE,
   hire_date        DATE,
-  specialization   TEXT,                                 -- FULLTEXT indexed (Role 2)
+  specialization   TEXT,                                 -- FULLTEXT indexed
   dept_id          INT,
   PRIMARY KEY (user_id),
   FOREIGN KEY (dept_id) REFERENCES Department(dept_id) ON DELETE SET NULL,
@@ -199,7 +199,7 @@ CREATE TABLE Expense (
 
 -- ── Milestone ─────────────────────────────────────────────────
 -- ER: Weak entity dependent on Project.
--- Used by milestone_30day_alert scheduled event (Role 7).
+-- Used by milestone_30day_alert scheduled event.
 CREATE TABLE Milestone (
   milestone_id            INT           NOT NULL AUTO_INCREMENT,
   project_id              INT           NOT NULL,
@@ -336,7 +336,7 @@ CREATE TABLE MATCHES (
 
 -- ============================================================
 --  END: schema/01_schema_er.sql
---  Next: schema/02_views_indexes.sql (Role 2)
+--  Next: schema/02_views_indexes.sql
 -- ============================================================
 
 -- Schema audited: all FK ON DELETE actions and CHECK constraints verified

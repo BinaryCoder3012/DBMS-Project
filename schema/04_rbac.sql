@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Role-Based Access Control (RBAC)
---  Role 5: Authentication & Role-Based Access Engineer
+--  Owner: Maddela Bhargava Krishna Reddy
 -- ============================================================
 --  Responsibilities:
 --    • Define MySQL roles and map to application roles
@@ -143,5 +143,5 @@ SET DEFAULT ROLE ALL TO
 
 -- ============================================================
 --  END: schema/04_rbac.sql
---  Next: schema/05_stored_procs_events.sql (Role 7)
+--  Next: schema/05_stored_procs_events.sql
 -- ============================================================

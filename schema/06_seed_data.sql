@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Seed / Sample Data
---  Role 1: Database Schema & ER Modeling Engineer
+--  Owner: Lakshya Sachdeva
 -- ============================================================
 --  Purpose: Populate the database with realistic sample data
 --           to demonstrate all ER relationships and system features.

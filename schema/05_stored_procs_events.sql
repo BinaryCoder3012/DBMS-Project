@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Stored Procedures, Events & Backup Strategy
---  Role 7: Backup, Recovery & Analytics Engineer
+--  Owner: Chaitrali Shrikant Dharmadhikari (backup notes: Arnav Gupta)
 -- ============================================================
 --  Responsibilities:
 --    • Stored procedure: generate_annual_report(dept_id)
@@ -213,5 +213,5 @@ DO
 
 -- ============================================================
 --  END: schema/05_stored_procs_events.sql
---  Next: schema/06_seed_data.sql (Role 1)
+--  Next: schema/06_seed_data.sql
 -- ============================================================

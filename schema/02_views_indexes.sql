@@ -1,6 +1,6 @@
 -- ============================================================
 --  UniGrant — Views & Index Strategy
---  Role 2: SQL & Query Optimization Engineer
+--  Owner: Arnav Gupta
 -- ============================================================
 --  Responsibilities:
 --    • Design SQL views for each access tier (Public/PI/Admin)
@@ -213,7 +213,7 @@ CREATE FULLTEXT INDEX FT_User_Specialization
 
 -- ============================================================
 --  END: schema/02_views_indexes.sql
---  Next: schema/03_triggers_integrity.sql (Role 3)
+--  Next: schema/03_triggers_integrity.sql
 -- ============================================================
 
 -- Optimization: Verified execution plans against 500+ row seed data
