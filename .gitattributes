@@ -1,0 +1,10 @@
+# Line endings: keep text as LF in the repository, never touch binaries
+* text=auto
+*.sql text eol=lf
+*.sh text eol=lf
+
+*.pdf binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary
