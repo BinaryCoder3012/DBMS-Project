@@ -258,8 +258,14 @@ function SignIn({ onLogin }) {
       const u = await api.login(loginEmail, loginPass);   // POST /api/auth/login → MySQL
       await initDB();                                     // fetch all tables into DB.*
       onLogin(u);
-    } catch {
-      // Fall back to the local copy so the app can be shown without MySQL running
+    } catch (err) {
+      // A real refusal from the server stops here. Only an unreachable server
+      // or database falls back to the local preview copy.
+      if (err.status && err.status < 500) {
+        setErr("That email and password don't match a user. Pick one of the demo accounts above, or check for typos.");
+        setBusy(null);
+        return;
+      }
       const mockUser = DB.users.find(
         u => u.email.toLowerCase() === loginEmail.trim().toLowerCase() && (u.password === loginPass.trim() || !loginPass)
       );

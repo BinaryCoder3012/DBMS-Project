@@ -8,6 +8,7 @@
 import { useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
+import { api } from "./api.js";
 import { logSQL } from "./lib/db.js";
 import { NAV } from "./lib/nav.js";
 import { Mark, QueryLog } from "./components/ui.jsx";
@@ -41,7 +42,7 @@ export default function UniGrant() {
     window.scrollTo(0, 0);
   }
 
-  function logout() { setUser(null); setActive("dashboard"); setFocusId(null); window.scrollTo(0, 0); }
+  function logout() { api.logout(); setUser(null); setActive("dashboard"); setFocusId(null); window.scrollTo(0, 0); }
 
   function go(id, focus = null) {
     // only allow screens this role is granted

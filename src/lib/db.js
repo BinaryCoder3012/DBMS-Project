@@ -2,8 +2,13 @@
  * UniGrant data layer
  * ───────────────────
  * DB holds every relation the UI reads. It starts with a small local copy so
- * the app can be demonstrated without MySQL, and initDB() replaces it with
- * real rows from the Express API (server/index.js) after a successful login.
+ * the app can be previewed without MySQL, and initDB() replaces it with real
+ * rows from the Express API (server/index.js) after a successful login.
+ *
+ * DB.live says which of the two is in use. When it is true, every write goes
+ * to the API and the screen reloads from MySQL, so a refusal from a trigger or
+ * a CHECK constraint is what the user sees. When it is false, screens change
+ * only the local copy.
  *
  * logSQL() records the SQL each screen runs so the query log can show it.
  */
@@ -11,6 +16,7 @@
 import { api } from "../api.js";
 
 export const DB = {
+  live: false,
   users: [
     { user_id: 1, first_name: "Arjun", last_name: "Mehta", email: "arjun@university.edu", password: "pi123", role: "PI", dept_id: 1, specialization: "Renewable Energy, Solar Photovoltaics, Grid Storage, Wind Energy", phone: "+91-98765-43210", hire_date: "2018-07-01" },
     { user_id: 2, first_name: "Priya", last_name: "Sharma", email: "priya@university.edu", password: "admin123", role: "Admin", dept_id: 3, specialization: "Administration, Policy", phone: "+91-98765-43211", hire_date: "2015-03-15" },
@@ -86,12 +92,14 @@ export const DB = {
    Called once after a successful login.
 ═══════════════════════════════════════════════════════════════ */
 export async function initDB() {
+  // A role without access to a table gets a 403, which leaves that list empty.
+  const allowed = p => p.catch(err => { if (err.status === 403) return []; throw err; });
   const [users, departments, proposals, grants, projects,
          budgetHeads, expenses, milestones, researchOutputs,
          externalCalls, worksOn] = await Promise.all([
-    api.getUsers(), api.getDepartments(), api.getProposals(),
-    api.getGrants(), api.getProjects(), api.getBudgetHeads(),
-    api.getExpenses(), api.getMilestones(), api.getResearchOutputs(),
+    api.getUsers(), api.getDepartments(), allowed(api.getProposals()),
+    allowed(api.getGrants()), api.getProjects(), allowed(api.getBudgetHeads()),
+    allowed(api.getExpenses()), api.getMilestones(), api.getResearchOutputs(),
     api.getExternalCalls(), api.getWorksOn(),
   ]);
   DB.users            = users;
@@ -105,6 +113,7 @@ export async function initDB() {
   DB.research_outputs = researchOutputs;
   DB.external_calls   = externalCalls;
   DB.works_on         = worksOn;
+  DB.live             = true;
 }
 
 /* ═══════════════════════════════════════════════════════════════
