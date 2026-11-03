@@ -1,12 +1,24 @@
 /**
  * DBA console (admin_role only): roles, views, triggers, the annual report
- * procedure and the index strategy, with the procedure runnable per department.
+ * procedure, the index strategy, and the analytical queries Q1 to Q6.
+ *
+ * The SQL shown here is imported from schema/*.sql at build time, so what the
+ * screen displays is what the database runs.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "../api.js";
 import { DB, logSQL, inr } from "../lib/db.js";
 import { Figure, PageHead, Notice, Code } from "../components/ui.jsx";
 import { ROLES } from "../lib/nav.js";
+import viewsFile from "../../schema/02_views_indexes.sql?raw";
+import triggersFile from "../../schema/03_triggers_integrity.sql?raw";
+import rbacFile from "../../schema/04_rbac.sql?raw";
+import procsFile from "../../schema/05_stored_procs_events.sql?raw";
+import queriesFile from "../../schema/08_queries.sql?raw";
+
+const pick = (text, pattern) => (text.replace(/\r\n/g, "\n").match(pattern) || [""])[0];
+const pickAll = (text, pattern) => (text.replace(/\r\n/g, "\n").match(pattern) || []).join("\n");
 
 const TABS = [
   ["roles", "Roles and grants"],
@@ -14,103 +26,113 @@ const TABS = [
   ["triggers", "Triggers and events"],
   ["proc", "Stored procedure"],
   ["indexes", "Indexes"],
+  ["queries", "Queries"],
 ];
 
 const ROLE_ROWS = [
   { key: "Admin", perms: ["ALL PRIVILEGES", "CREATE USER", "GRANT OPTION"], note: "Full DBA" },
-  { key: "PI", perms: ["SELECT", "INSERT", "UPDATE"], note: "No CREATE USER or DROP" },
-  { key: "Grant_Officer", perms: ["SELECT on Proposal", "SELECT, UPDATE on Expense"], note: "CREATE USER revoked" },
-  { key: "Student", perms: ["SELECT through views"], note: "Row-level filter" },
+  { key: "PI", perms: ["SELECT, INSERT, UPDATE on Proposal", "SELECT, INSERT on Expense"], note: "No CREATE USER or DROP" },
+  { key: "Grant_Officer", perms: ["UPDATE (status) on Proposal", "SELECT, UPDATE on Expense", "INSERT on Grant_, Project, BudgetHead"], note: "CREATE USER revoked" },
+  { key: "Student", perms: ["SELECT through views"], note: "No table access" },
 ];
 
-const ROLE_SQL = `-- Create roles
-CREATE ROLE admin_role, pi_role, grant_officer_role, student_role;
-
--- Admin: full DBA
-GRANT ALL PRIVILEGES ON unigrant.* TO admin_role WITH GRANT OPTION;
-GRANT CREATE USER ON *.* TO admin_role;
-
--- PI: read/write on own data, no user management
-GRANT SELECT, INSERT, UPDATE ON unigrant.Proposal TO pi_role;
-GRANT SELECT, INSERT, UPDATE ON unigrant.Expense   TO pi_role;
-GRANT SELECT ON unigrant.Project TO pi_role;
-GRANT SELECT ON unigrant.BudgetHead TO pi_role;
-
--- Grant officer: view proposals, approve expenses only
-GRANT SELECT ON unigrant.Proposal TO grant_officer_role;
-GRANT SELECT, UPDATE ON unigrant.Expense TO grant_officer_role;
-REVOKE CREATE USER ON *.* FROM grant_officer_role;  -- explicitly blocked
-
--- Student: view-only via restricted views (row-level security)
-GRANT SELECT ON unigrant.Public_Project_View TO student_role;
-CREATE POLICY student_rows ON Project
-  USING (project_id IN (
-    SELECT project_id FROM WORKS_ON WHERE user_id = CURRENT_USER_ID()
-  ));`;
+const ROLE_SQL = pickAll(rbacFile, /^(?:CREATE ROLE|GRANT|REVOKE)[^;]*;/gm);
 
 const VIEWS = [
-  { name: "Public_Project_View", desc: "For outsiders. No money columns.",
-    sql: `CREATE VIEW Public_Project_View AS\nSELECT\n  p.project_id, p.project_title,\n  CONCAT(u.first_name,' ',u.last_name) AS principal_investigator,\n  g.funding_agency, p.start_date, p.end_date, p.status\nFROM Project p\nJOIN User u ON p.pi_id = u.user_id\nJOIN Grant_ g ON p.grant_id = g.grant_id;\n-- Columns hidden: current_balance, stipend_amount, salaries, internal notes` },
-  { name: "PI_Dashboard_View", desc: "A PI's projects with utilisation and open milestones.",
-    sql: `CREATE VIEW PI_Dashboard_View AS\nSELECT\n  p.project_title, p.current_balance,\n  COUNT(CASE WHEN m.status='Pending' THEN 1 END) AS pending_milestones,\n  ROUND(SUM(bh.spent_amount)/SUM(bh.allocated_amount)*100,1) AS budget_utilisation_pct,\n  COUNT(DISTINCT wo.user_id) AS team_size\nFROM Project p\nJOIN Milestone m ON p.project_id = m.project_id\nJOIN BudgetHead bh ON p.project_id = bh.project_id\nJOIN WORKS_ON wo ON p.project_id = wo.project_id\nWHERE p.pi_id = CURRENT_USER_ID()\nGROUP BY p.project_id;` },
-  { name: "Admin_Analytics_View", desc: "Funding, projects and outputs per department.",
-    sql: `CREATE VIEW Admin_Analytics_View AS\nSELECT\n  d.dept_name,\n  SUM(g.total_amount_awarded)       AS total_funding,\n  COUNT(DISTINCT p.project_id)     AS total_projects,\n  COUNT(DISTINCT ro.output_id)     AS total_publications,\n  COUNT(DISTINCT CASE WHEN u.role='Student' THEN u.user_id END) AS students_trained\nFROM Department d\nLEFT JOIN Project p ON d.dept_id = p.department_id\nLEFT JOIN Grant_ g  ON p.grant_id = g.grant_id\nLEFT JOIN ResearchOutput ro ON p.project_id = ro.project_id\nLEFT JOIN WORKS_ON wo ON p.project_id = wo.project_id\nLEFT JOIN User u ON wo.user_id = u.user_id\nGROUP BY d.dept_id;` },
-];
+  { name: "Public_Project_View", desc: "For outsiders. No money columns." },
+  { name: "PI_Dashboard_View", desc: "A PI's projects with utilisation and open milestones." },
+  { name: "Admin_Analytics_View", desc: "Funding, projects and outputs per department." },
+  { name: "Student_Project_View", desc: "A student's assignments, without money columns." },
+].map(v => ({ ...v, sql: pick(viewsFile, new RegExp(`CREATE OR REPLACE VIEW ${v.name}[\\s\\S]*?;`)) }));
 
 const TRIGGERS = [
-  { name: "balance_check_before_expense", desc: "Refuses an expense larger than the head's remaining balance.",
-    sql: `CREATE TRIGGER balance_check_before_expense\nBEFORE INSERT ON Expense FOR EACH ROW\nBEGIN\n  DECLARE avail DECIMAL(15,2);\n  SELECT remaining_balance INTO avail\n  FROM BudgetHead WHERE budgethead_id = NEW.budgethead_id;\n  IF NEW.amount > avail THEN\n    SIGNAL SQLSTATE '45000'\n    SET MESSAGE_TEXT = 'ERR: Insufficient budget balance in this head';\n  END IF;\nEND;` },
-  { name: "active_project_limit_pi", desc: "Stops a sixth active project for one PI.",
-    sql: `CREATE TRIGGER active_project_limit_pi\nBEFORE INSERT ON Proposal FOR EACH ROW\nBEGIN\n  DECLARE cnt INT;\n  SELECT COUNT(*) INTO cnt FROM Project\n  WHERE pi_id = NEW.pi_id AND status = 'Active';\n  IF cnt >= 5 THEN\n    SIGNAL SQLSTATE '45000'\n    SET MESSAGE_TEXT = 'ERR: PI already has 5 active projects';\n  END IF;\nEND;` },
-  { name: "auto_close_project", desc: "Closes a project once its end date has passed.",
-    sql: `CREATE TRIGGER auto_close_project\nAFTER UPDATE ON Project FOR EACH ROW\nBEGIN\n  IF CURDATE() > NEW.end_date AND NEW.status = 'Active' THEN\n    SET NEW.status = 'Closed';\n  END IF;\nEND;` },
-  { name: "milestone_30day_alert", desc: "Scheduled event. Notifies the PI 30 days before a milestone.",
-    sql: `CREATE EVENT milestone_30day_alert\nON SCHEDULE EVERY 1 DAY STARTS CURDATE()\nDO\n  INSERT INTO Notification(user_id, message, sent_at)\n  SELECT p.pi_id,\n    CONCAT('Milestone due in 30 days: ', m.title,\n           ' | Project: ', p.project_title),\n    NOW()\n  FROM Milestone m\n  JOIN Project p ON m.project_id = p.project_id\n  WHERE m.status = 'Pending'\n    AND m.due_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY);` },
-];
+  { name: "balance_check_before_expense", desc: "Refuses an expense larger than the head's remaining balance." },
+  { name: "update_budget_on_approval", desc: "Moves the money when an expense is approved or reversed." },
+  { name: "active_project_limit_pi", desc: "Stops a proposal from a PI with five active projects." },
+  { name: "auto_close_project", desc: "Closes a project once its end date has passed." },
+  { name: "prevent_duplicate_expense_receipt", desc: "Refuses a receipt already used on the project." },
+].map(t => ({ ...t, sql: pick(triggersFile, new RegExp(`CREATE TRIGGER ${t.name}[\\s\\S]*?END //`)).replace(/ \/\/$/, ";") }));
 
-const PROC_SQL = `CREATE PROCEDURE generate_annual_report(IN p_dept_id INT)
-BEGIN
-  SELECT
-    d.dept_name,
-    SUM(g.total_amount_awarded)         AS total_funds_received,
-    COUNT(DISTINCT p.project_id)       AS total_projects,
-    SUM(CASE WHEN p.status='Active' THEN 1 ELSE 0 END) AS active_projects,
-    COUNT(DISTINCT ro.output_id)       AS total_research_outputs,
-    SUM(CASE WHEN ro.type='Publication' THEN 1 ELSE 0 END) AS publications,
-    SUM(CASE WHEN ro.type='Patent' THEN 1 ELSE 0 END)      AS patents,
-    COUNT(DISTINCT CASE WHEN u.role='Student' THEN u.user_id END) AS students_supported
-  FROM Department d
-  LEFT JOIN Project p        ON d.dept_id = p.department_id
-  LEFT JOIN Grant_ g         ON p.grant_id = g.grant_id
-  LEFT JOIN ResearchOutput ro ON p.project_id = ro.project_id
-  LEFT JOIN WORKS_ON wo      ON p.project_id = wo.project_id
-  LEFT JOIN User u           ON wo.user_id = u.user_id
-  WHERE d.dept_id = p_dept_id
-    AND YEAR(IFNULL(g.start_date, CURDATE())) = YEAR(CURDATE())
-  GROUP BY d.dept_id, d.dept_name;
-END //`;
+const EVENTS = [
+  { name: "milestone_30day_alert", desc: "Scheduled event. Notifies the PI 30 days before a milestone." },
+  { name: "monthly_budget_snapshot", desc: "Scheduled event. Archives balances into BudgetSnapshot." },
+  { name: "grant_closure_check", desc: "Scheduled event. Closes grants past their end date." },
+].map(t => ({ ...t, sql: pick(procsFile, new RegExp(`CREATE EVENT IF NOT EXISTS ${t.name}[\\s\\S]*?;`)) }));
 
-const INDEX_SQL = `-- B-tree composite: search and filter on the projects screen
-CREATE INDEX IDX_Project_Title_Status
-  ON Project(project_title, status);
+const PROC_SQL = pick(procsFile, /CREATE PROCEDURE generate_annual_report[\s\S]*?END \/\//).replace(/ \/\/$/, ";");
+const INDEX_SQL = pickAll(viewsFile, /^CREATE (?:FULLTEXT )?INDEX[\s\S]*?;/gm);
 
--- Name lookup
-CREATE INDEX IDX_User_Name
-  ON User(last_name, first_name);
+function ResultTable({ rows }) {
+  if (!rows.length) return <p className="empty">The query returned no rows.</p>;
+  const columns = Object.keys(rows[0]);
+  return (
+    <div className="tbl-wrap">
+      <table className="tbl">
+        <thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r, i) => <tr key={i}>{columns.map(c => <td key={c}>{String(r[c] ?? "—")}</td>)}</tr>)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
--- Expense timeline queries
-CREATE INDEX IDX_Expense_Date_Project
-  ON Expense(date, project_id);
+function Queries() {
+  const [list, setList] = useState([]);
+  const [active, setActive] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+  const [term, setTerm] = useState("renewable energy solar storage");
 
--- Milestones due soon (used by milestone_30day_alert)
-CREATE INDEX IDX_Milestone_Status_DueDate
-  ON Milestone(status, due_date);
+  useEffect(() => {
+    if (DB.live) api.reportQueries().then(setList).catch(err => setError(err.message));
+  }, []);
 
--- Full-text: grant matcher and proposal search
-CREATE FULLTEXT INDEX FT_Proposal
-  ON Proposal(abstract, title);
-CREATE FULLTEXT INDEX FT_User_Specialization
-  ON User(specialization);`;
+  async function run(query) {
+    setActive(query); setRows(null); setError(null);
+    logSQL(query.sql, `${query.id}: ${query.concept}`);
+    try {
+      setRows(await api.runQuery(query.id, query.id === "Q5" ? term : ""));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (!DB.live) return (
+    <div className="stack">
+      <Notice tone="wait" title="Connect to MySQL to run these.">The text below is schema/08_queries.sql.</Notice>
+      <Code>{queriesFile}</Code>
+    </div>
+  );
+
+  return (
+    <div className="stack">
+      {error && <Notice tone="bad" title="MySQL refused this.">{error}</Notice>}
+      <section className="panel">
+        <div className="panel-flush">
+          {list.map(q => (
+            <div key={q.id} className="row">
+              <div className="row-main">
+                <div className="row-title">{q.id}. {q.title}</div>
+                <div className="row-sub">{q.purpose}</div>
+              </div>
+              <span className="chip">{q.concept}</span>
+              <button className="btn btn-ink btn-sm" onClick={() => run(q)}>Run</button>
+            </div>
+          ))}
+        </div>
+      </section>
+      {active?.id === "Q5" && (
+        <form style={{ display: "flex", gap: 8 }} onSubmit={e => { e.preventDefault(); run(active); }}>
+          <input className="input" value={term} onChange={e => setTerm(e.target.value)} aria-label="Search term" />
+          <button className="btn btn-ink">Search</button>
+        </form>
+      )}
+      {active && <Code>{active.sql}</Code>}
+      {rows && <section className="panel"><ResultTable rows={rows} /></section>}
+    </div>
+  );
+}
 
 export default function DBA({ user }) {
   const [tab, setTab] = useState("roles");
@@ -119,11 +141,16 @@ export default function DBA({ user }) {
 
   if (user.role !== "Admin") return <p className="empty">The DBA console is only available to admin_role.</p>;
 
-  function runProc() {
+  async function runProc() {
     logSQL(`CALL generate_annual_report(${deptId});`, "Stored procedure execution");
+    if (DB.live) {
+      const r = await api.departmentReport(deptId);
+      setProcResult({ dept: r.dept_name, totalFunding: r.total_funds_received, active: r.active_projects, total: r.total_projects, pubs: r.publications, patents: r.patents, spent: r.total_expenditure, used: r.budget_utilisation_pct });
+      return;
+    }
     const dept = DB.departments.find(d => d.dept_id === deptId);
     const dProjects = DB.projects.filter(p => p.department_id === deptId);
-    const dGrants = dProjects.map(p => DB.grants.find(g => g.grant_id === p.grant_id)).filter(Boolean);
+    const dGrants = DB.grants.filter(g => dProjects.some(p => p.grant_id === g.grant_id));
     const dOutputs = DB.research_outputs.filter(o => dProjects.some(p => p.project_id === o.project_id));
     setProcResult({ dept: dept?.dept_name, totalFunding: dGrants.reduce((s, g) => s + Number(g.total_amount_awarded), 0), active: dProjects.filter(p => p.status === "Active").length, total: dProjects.length, pubs: dOutputs.filter(o => o.type === "Publication").length, patents: dOutputs.filter(o => o.type === "Patent").length });
   }
@@ -171,7 +198,7 @@ export default function DBA({ user }) {
 
       {tab === "triggers" && (
         <div className="stack">
-          {TRIGGERS.map(t => (
+          {[...TRIGGERS, ...EVENTS].map(t => (
             <section key={t.name}>
               <h2 className="sql-title"><code>{t.name}</code><span>{t.desc}</span></h2>
               <Code>{t.sql}</Code>
@@ -200,6 +227,7 @@ export default function DBA({ user }) {
                     <Figure value={procResult.total} label="Projects" sub={`${procResult.active} active`} />
                     <Figure value={procResult.pubs} label="Publications" />
                     <Figure value={procResult.patents} label="Patents" />
+                    {procResult.spent !== undefined && <Figure value={inr(procResult.spent)} label="Approved spending" sub={`${procResult.used ?? 0}% of funds`} />}
                   </div>
                 </div>
               )}
@@ -209,6 +237,8 @@ export default function DBA({ user }) {
       )}
 
       {tab === "indexes" && <Code>{INDEX_SQL}</Code>}
+
+      {tab === "queries" && <Queries />}
     </div>
   );
 }
