@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { api } from "../api.js";
 import { DB, logSQL, inr, inrShort, fmtDate, daysUntil, fullName } from "../lib/db.js";
 import { Status, Figure, PageHead, Avatar } from "../components/ui.jsx";
 import { ROLES } from "../lib/nav.js";
@@ -192,15 +193,23 @@ export function Departments() {
 
 // ─── Analytics ────────────────────────────────────────────────
 export function Analytics({ user }) {
-  useEffect(() => { logSQL(`SELECT * FROM Admin_Analytics_View;`, "Cross-department aggregates"); }, []);
+  const [view, setView] = useState(null);
+  useEffect(() => {
+    logSQL(`SELECT * FROM Admin_Analytics_View;`, "Cross-department aggregates");
+    if (DB.live && user.role === "Admin") api.analytics().then(setView).catch(() => {});
+  }, [user.role]);
   if (user.role !== "Admin") return <p className="empty">Analytics is only available to admin_role.</p>;
   const total = DB.grants.reduce((s, g) => s + Number(g.total_amount_awarded), 0);
-  const depts = DB.departments.map(d => {
-    const projects = DB.projects.filter(p => p.department_id === d.dept_id);
-    const funding = projects.map(p => DB.grants.find(g => g.grant_id === p.grant_id)).filter(Boolean).reduce((s, g) => s + Number(g.total_amount_awarded), 0);
-    const outputs = DB.research_outputs.filter(o => projects.some(p => p.project_id === o.project_id)).length;
-    return { ...d, funding, projects: projects.length, outputs };
-  }).sort((a, b) => b.funding - a.funding);
+  // Live rows come from the view; the offline preview computes the same figures.
+  const depts = (view
+    ? view.map(v => ({ dept_id: v.dept_id, dept_name: v.dept_name, funding: v.total_funding, projects: v.total_projects, outputs: v.total_research_outputs }))
+    : DB.departments.map(d => {
+        const projects = DB.projects.filter(p => p.department_id === d.dept_id);
+        const funding = DB.grants.filter(g => projects.some(p => p.grant_id === g.grant_id)).reduce((s, g) => s + Number(g.total_amount_awarded), 0);
+        const outputs = DB.research_outputs.filter(o => projects.some(p => p.project_id === o.project_id)).length;
+        return { ...d, funding, projects: projects.length, outputs };
+      })
+  ).sort((a, b) => b.funding - a.funding);
   const maxF = Math.max(1, ...depts.map(d => d.funding));
   const cats = ["Equipment", "Travel", "Manpower", "Consumables"].map(cat => {
     const heads = DB.budget_heads.filter(b => b.category === cat);
