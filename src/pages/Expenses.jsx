@@ -9,7 +9,7 @@ import { useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { api } from "../api.js";
-import { DB, logSQL, inr, fmtDate } from "../lib/db.js";
+import { DB, initDB, logSQL, inr, fmtDate } from "../lib/db.js";
 import { Status, PageHead, Notice, Modal } from "../components/ui.jsx";
 
 const FILTERS = ["All", "Pending", "Approved", "Rejected"];
@@ -21,6 +21,7 @@ export default function Expenses({ user }) {
   const [msg, setMsg] = useState(null);
   const [filter, setFilter] = useState("All");
   const [acted, setActed] = useState(null);
+  const [busy, setBusy] = useState(false);
   const projectOptions = user.role === "Admin" ? DB.projects : DB.projects.filter(p => p.pi_id === user.user_id);
   const firstProject = projectOptions[0]?.project_id ?? 1;
   const firstHead = budgetHeads.find(b => b.project_id === firstProject)?.budgethead_id ?? 1;
@@ -40,54 +41,90 @@ export default function Expenses({ user }) {
     gsap.from(`[data-stamp="${acted}"]`, { scale: 2.6, rotate: -24, autoAlpha: 0, duration: 0.45, ease: "back.out(2.2)" });
   }, { dependencies: [acted], scope: table });
 
-  function approve(id) {
+  // Runs one write against MySQL and reloads, so the screen always shows what
+  // the database accepted. A refusal is shown exactly as the database gave it.
+  async function write(call, success) {
+    setBusy(true);
+    try {
+      await call();
+      await initDB();
+      setExpenses([...DB.expenses]);
+      setBudgetHeads([...DB.budget_heads]);
+      success();
+      return true;
+    } catch (err) {
+      setMsg({ tone: "bad", title: "MySQL refused this.", text: err.message });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approve(id) {
     const exp = expenses.find(e => e.expense_id === id);
-    api.approveExpense(id, user.user_id).catch(() => {});
-    logSQL(`BEGIN;\nUPDATE Expense SET status='Approved', approved_by=${user.user_id}, approval_date=NOW() WHERE expense_id=${id};\nUPDATE BudgetHead SET spent_amount=spent_amount+${exp.amount}, remaining_balance=remaining_balance-${exp.amount} WHERE budgethead_id=${exp.budgethead_id};\nCOMMIT;`, "ACID: Expense approval transaction");
-    // Update the shared copy first so every screen sees the new balance,
-    // then mirror it into local state.
+    logSQL(`START TRANSACTION;\nSELECT status FROM Expense WHERE expense_id=${id} FOR UPDATE;\nSELECT remaining_balance FROM BudgetHead WHERE budgethead_id=${exp.budgethead_id} FOR UPDATE;\nUPDATE Expense SET status='Approved', approved_by=${user.user_id}, approval_date=CURDATE() WHERE expense_id=${id};\n-- update_budget_on_approval moves the money\nCOMMIT;`, "ACID: Expense approval transaction");
+    const done = () => {
+      setActed(id);
+      setMsg({ tone: "good", title: `Expense ${exp.receipt_reference || "#" + id} approved.`, text: "The expense and its budget head were updated in one committed transaction." });
+    };
+    if (DB.live) return write(() => api.approveExpense(id), done);
+
+    // Offline preview: change the local copy only.
+    if (Number(exp.amount) > Number(budgetHeads.find(b => b.budgethead_id === exp.budgethead_id)?.remaining_balance ?? 0)) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "ERR-BH002: Approving this expense would overspend the budget head" });
+      return;
+    }
     const dbExp = DB.expenses.find(e => e.expense_id === id);
     if (dbExp) Object.assign(dbExp, { status: "Approved", approved_by: user.user_id });
     const dbHead = DB.budget_heads.find(b => b.budgethead_id === exp.budgethead_id);
     if (dbHead) Object.assign(dbHead, { spent_amount: Number(dbHead.spent_amount) + Number(exp.amount), remaining_balance: Number(dbHead.remaining_balance) - Number(exp.amount) });
-    setExpenses(prev => prev.map(e => e.expense_id === id ? { ...e, status: "Approved", approved_by: user.user_id } : e));
+    setExpenses([...DB.expenses]);
     setBudgetHeads(DB.budget_heads.map(b => ({ ...b })));
-    setActed(id);
-    setMsg({ tone: "good", title: `Expense ${exp.receipt_reference || "#" + id} approved.`, text: "The expense and its budget head were updated in one committed transaction." });
+    done();
   }
 
-  function reject(id) {
-    api.rejectExpense(id).catch(() => {});
+  async function reject(id) {
     logSQL(`UPDATE Expense SET status='Rejected' WHERE expense_id=${id};`, "Reject expense");
-    setExpenses(prev => prev.map(e => e.expense_id === id ? { ...e, status: "Rejected" } : e));
+    const done = () => {
+      setActed(id);
+      setMsg({ tone: "", title: `Expense #${id} rejected.`, text: "No money moved. The budget head is unchanged." });
+    };
+    if (DB.live) return write(() => api.rejectExpense(id), done);
+
     const dbExp = DB.expenses.find(e => e.expense_id === id);
     if (dbExp) dbExp.status = "Rejected";
-    setActed(id);
-    setMsg({ tone: "", title: `Expense #${id} rejected.`, text: "No money moved. The budget head is unchanged." });
+    setExpenses([...DB.expenses]);
+    done();
   }
 
-  function submitExpense() {
-    const bh = budgetHeads.find(b => b.budgethead_id === Number(form.budgethead_id));
+  async function submitExpense() {
     const amt = Number(form.amount);
-    logSQL(`SELECT remaining_balance FROM BudgetHead WHERE budgethead_id=${form.budgethead_id};\n-- Returns: ${bh?.remaining_balance}`, "Trigger: balance_check_before_expense");
-    if (!bh || amt > Number(bh.remaining_balance)) {
-      setMsg({ tone: "bad", title: "Refused by balance_check_before_expense.", text: `You asked for ${inr(amt)} but only ${inr(bh?.remaining_balance || 0)} is left in ${bh?.category || "this head"}. Lower the amount or charge a different head.` });
-      setShowForm(false); return;
-    }
-    if (!(amt > 0) || !form.description.trim()) {
-      setMsg({ tone: "bad", title: "Refused by a CHECK constraint.", text: "The amount must be more than zero (chk_expense_amount) and the expense needs a description." });
+    logSQL(`INSERT INTO Expense (project_id, budgethead_id, amount, description, receipt_reference, status, date)\nVALUES (${form.project_id}, ${form.budgethead_id}, ${amt}, '${form.description}', '${form.receipt_reference}', 'Pending', CURDATE());\n-- BEFORE INSERT: balance_check_before_expense, prevent_duplicate_expense_receipt`, "Insert expense");
+    const done = () => {
+      setMsg({ tone: "good", title: "Expense logged.", text: "It now waits for a grant officer to approve it." });
+      setShowForm(false);
+    };
+    if (DB.live) {
+      const saved = await write(() => api.createExpense({
+        project_id: Number(form.project_id), budgethead_id: Number(form.budgethead_id),
+        amount: amt, description: form.description, receipt_reference: form.receipt_reference,
+      }), done);
+      if (!saved) setShowForm(false);
       return;
     }
-    const ne = { expense_id: expenses.length + 1, ...form, amount: amt, budgethead_id: Number(form.budgethead_id), date: new Date().toISOString().split("T")[0], status: "Pending", approved_by: null };
-    logSQL(`INSERT INTO Expense (project_id, budgethead_id, amount, description, receipt_reference, status, date)\nVALUES (${form.project_id}, ${form.budgethead_id}, ${amt}, '${form.description}', '${form.receipt_reference}', 'Pending', NOW());`, "Insert expense");
-    api.createExpense({
-      project_id: ne.project_id, budgethead_id: ne.budgethead_id,
-      amount: ne.amount, description: ne.description, receipt_reference: ne.receipt_reference,
-    }).catch(() => {});
-    DB.expenses.push(ne);
+
+    const bh = budgetHeads.find(b => b.budgethead_id === Number(form.budgethead_id));
+    if (!bh || amt > Number(bh.remaining_balance)) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: `ERR-BH001: You asked for ${inr(amt)} but only ${inr(bh?.remaining_balance || 0)} is left in ${bh?.category || "this head"}.` });
+      setShowForm(false); return;
+    }
+    if (!(amt > 0)) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "The amount must be more than zero (chk_expense_amount)." });
+      setShowForm(false); return;
+    }
+    DB.expenses.push({ expense_id: DB.expenses.length + 1, ...form, amount: amt, budgethead_id: Number(form.budgethead_id), date: new Date().toISOString().split("T")[0], status: "Pending", approved_by: null });
     setExpenses([...DB.expenses]);
-    setMsg({ tone: "good", title: "Expense logged.", text: "It now waits for a grant officer to approve it." });
-    setShowForm(false);
+    done();
   }
 
   const headOptions = budgetHeads.filter(b => b.project_id === Number(form.project_id));
@@ -135,8 +172,8 @@ export default function Expenses({ user }) {
                       <td className="nowrap" style={{ textAlign: "right" }}>
                         {e.status === "Pending" ? (
                           <span style={{ display: "inline-flex", gap: 6 }}>
-                            <button className="btn btn-green btn-sm" onClick={() => approve(e.expense_id)}>Approve</button>
-                            <button className="btn btn-red btn-sm" onClick={() => reject(e.expense_id)}>Reject</button>
+                            <button className="btn btn-green btn-sm" disabled={busy} onClick={() => approve(e.expense_id)}>Approve</button>
+                            <button className="btn btn-red btn-sm" disabled={busy} onClick={() => reject(e.expense_id)}>Reject</button>
                           </span>
                         ) : acted === e.expense_id ? (
                           <span data-stamp={e.expense_id} className={`stamp ${e.status === "Rejected" ? "rejected" : ""}`}>{e.status.toUpperCase()}</span>
@@ -184,7 +221,7 @@ export default function Expenses({ user }) {
           </div>
           <div className="modal-foot">
             <button className="btn" onClick={() => setShowForm(false)}>Cancel</button>
-            <button className="btn btn-ink" onClick={submitExpense}>Log expense</button>
+            <button className="btn btn-ink" disabled={busy} onClick={submitExpense}>Log expense</button>
           </div>
         </Modal>
       )}
