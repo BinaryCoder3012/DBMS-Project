@@ -1,15 +1,32 @@
 /**
- * Proposals. Workflow: a PI drafts a proposal; the active_project_limit_pi
- * trigger and the CHECK constraints on budget and duration guard the insert.
+ * Proposals, the start of workflow W1.
+ *   A PI drafts and submits a proposal; active_project_limit_pi and the CHECK
+ *   constraints guard the insert.
+ *   A grant officer reviews it, then rejects it or awards a grant. The award is
+ *   one transaction over Proposal, Grant_, Project and BudgetHead.
  */
 
 import { useMemo, useState } from "react";
 import { api } from "../api.js";
-import { DB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
+import { DB, initDB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
 import { Status, PageHead, Notice, Modal } from "../components/ui.jsx";
 
 const LIFECYCLE = ["Draft", "Submitted", "Under Review", "Approved", "Rejected"];
 const EMPTY = { title: "", abstract: "", total_budget_requested: "", duration_months: "" };
+const HEAD_SPLIT = [["Equipment", 0.4], ["Travel", 0.1], ["Manpower", 0.35], ["Consumables", 0.15]];
+
+// Prefills the award form from what the proposal asked for.
+function awardDraft(p) {
+  const start = new Date();
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + Number(p.duration_months));
+  const iso = d => d.toISOString().split("T")[0];
+  return {
+    proposal: p, funding_agency: "", agency_contact_info: "", reporting_frequency: "Quarterly",
+    start_date: iso(start), end_date: iso(end),
+    heads: HEAD_SPLIT.map(([category, share]) => ({ category, allocated_amount: Math.round(p.total_budget_requested * share) })),
+  };
+}
 
 export default function Proposals({ user }) {
   const [proposals, setProposals] = useState(DB.proposals);
@@ -19,44 +36,95 @@ export default function Proposals({ user }) {
   const [filter, setFilter] = useState(null);
   const [q, setQ] = useState("");
   const [fresh, setFresh] = useState(null);
+  const [award, setAward] = useState(null);
+  const [busy, setBusy] = useState(false);
   const canEdit = user.role === "PI" || user.role === "Admin";
-  const readOnly = user.role === "Grant_Officer";
+  const isOffice = user.role === "Grant_Officer" || user.role === "Admin";
 
-  const mine = user.role === "Admin" || readOnly ? proposals : proposals.filter(p => p.pi_id === user.user_id);
+  const mine = isOffice ? proposals : proposals.filter(p => p.pi_id === user.user_id);
   const shown = useMemo(() => mine
     .filter(p => !filter || p.status === filter)
     .filter(p => !q || (p.title + " " + (p.abstract || "")).toLowerCase().includes(q.toLowerCase())),
   [mine, filter, q]);
 
-  function submit() {
-    const activeCount = DB.projects.filter(p => p.pi_id === user.user_id && p.status === "Active").length;
-    logSQL(`SELECT COUNT(*) FROM Project WHERE pi_id = ${user.user_id} AND status = 'Active';`, "Trigger: active project limit check");
-    if (activeCount >= 5) {
-      setMsg({ tone: "bad", title: "Refused by active_project_limit_pi.", text: "You already lead five active projects, so a new proposal can't be inserted until one closes." });
-      setShowForm(false); return;
+  // Runs a write against MySQL, then reloads the screen from what it stored.
+  async function write(call) {
+    setBusy(true);
+    try {
+      const result = await call();
+      await initDB();
+      setProposals(DB.proposals);
+      return result ?? true;
+    } catch (err) {
+      setMsg({ tone: "bad", title: "MySQL refused this.", text: err.message });
+      return null;
+    } finally {
+      setBusy(false);
     }
-    if (!form.title || Number(form.total_budget_requested) <= 0) {
-      setMsg({ tone: "bad", title: "Refused by a CHECK constraint.", text: "The title can't be empty and the budget must be more than zero (chk_proposal_budget)." });
+  }
+
+  async function submit() {
+    logSQL(`INSERT INTO Proposal (title, abstract, total_budget_requested, duration_months, submission_date, status, eligibility_check_passed, pi_id)\nVALUES ('${form.title}', '...', ${form.total_budget_requested}, ${form.duration_months}, CURDATE(), 'Draft', TRUE, ${user.user_id});\n-- BEFORE INSERT: active_project_limit_pi`, "New proposal insert");
+    const saved = () => {
+      setMsg({ tone: "good", title: "Proposal saved as a draft.", text: "Submit it when it is ready for review." });
+      setShowForm(false);
+      setForm(EMPTY);
+    };
+
+    if (DB.live) {
+      const result = await write(() => api.createProposal({
+        title: form.title, abstract: form.abstract,
+        total_budget_requested: Number(form.total_budget_requested),
+        duration_months: Number(form.duration_months), pi_id: user.user_id,
+      }));
+      if (result) { setFresh(result.proposal_id); saved(); } else setShowForm(false);
       return;
     }
+
+    // Offline preview: mirror the database's checks on the local copy.
+    const activeCount = DB.projects.filter(p => p.pi_id === user.user_id && p.status === "Active").length;
+    if (activeCount >= 5) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "ERR-PI001: PI already has 5 active projects; cannot submit new proposal" });
+      setShowForm(false); return;
+    }
+    if (!form.title || !(Number(form.total_budget_requested) > 0) || !(Number(form.duration_months) > 0)) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "The title can't be empty, and budget and duration must be more than zero (chk_proposal_budget, chk_proposal_duration)." });
+      setShowForm(false); return;
+    }
     const np = { proposal_id: proposals.length + 1, ...form, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months), submission_date: new Date().toISOString().split("T")[0], status: "Draft", eligibility_check_passed: true, pi_id: user.user_id };
-    logSQL(`INSERT INTO Proposal (title, abstract, total_budget_requested, duration_months, submission_date, status, eligibility_check_passed, pi_id)\nVALUES ('${form.title}', '...', ${form.total_budget_requested}, ${form.duration_months}, NOW(), 'Draft', TRUE, ${user.user_id});`, "New proposal insert");
-    api.createProposal({
-      title: form.title, abstract: form.abstract,
-      total_budget_requested: Number(form.total_budget_requested),
-      duration_months: Number(form.duration_months), pi_id: user.user_id,
-    }).catch(() => {});
     DB.proposals.push(np);
     setProposals([...DB.proposals]);
     setFresh(np.proposal_id);
-    setMsg({ tone: "good", title: "Proposal saved as a draft.", text: "It's at the top of the Draft stage below." });
-    setShowForm(false);
-    setForm(EMPTY);
+    saved();
+  }
+
+  async function move(p, status) {
+    logSQL(`UPDATE Proposal SET status='${status}' WHERE proposal_id=${p.proposal_id};`, "Proposal life cycle");
+    if (DB.live) {
+      if (await write(() => api.setProposalStatus(p.proposal_id, status))) {
+        setMsg({ tone: status === "Rejected" ? "" : "good", title: `Moved to ${status}.`, text: p.title });
+      }
+      return;
+    }
+    Object.assign(DB.proposals.find(x => x.proposal_id === p.proposal_id), { status });
+    setProposals([...DB.proposals]);
+    setMsg({ tone: "", title: `Moved to ${status}.`, text: p.title });
+  }
+
+  async function confirmAward() {
+    const { proposal, heads, ...fields } = award;
+    logSQL(`START TRANSACTION;\nSELECT status FROM Proposal WHERE proposal_id=${proposal.proposal_id} FOR UPDATE;\nINSERT INTO Grant_ (...) VALUES (...);\nINSERT INTO Project (...) VALUES (...);\nINSERT INTO BudgetHead (...) VALUES (...); -- one per category\nUPDATE Proposal SET status='Approved' WHERE proposal_id=${proposal.proposal_id};\nCOMMIT;`, "W1: multi-table award transaction");
+    const result = await write(() => api.awardGrant({
+      proposal_id: proposal.proposal_id, ...fields,
+      budget_heads: heads.filter(h => Number(h.allocated_amount) !== 0),
+    }));
+    setAward(null);
+    if (result) setMsg({ tone: "good", title: `Grant awarded, ${inr(result.total)} in total.`, text: "The proposal, grant, project and budget heads were written in one committed transaction." });
   }
 
   return (
     <div>
-      <PageHead title="Proposals" sub={readOnly ? "Read only. grant_officer_role has SELECT on Proposal and nothing else." : "Each proposal moves through five states, stored as an ENUM on Proposal.status."}>
+      <PageHead title="Proposals" sub="Each proposal moves through five states, stored as an ENUM on Proposal.status.">
         {canEdit && <button className="btn btn-ink" onClick={() => setShowForm(true)}>Write a proposal</button>}
       </PageHead>
 
@@ -95,6 +163,12 @@ export default function Proposals({ user }) {
                   <span>Submitted {fmtDate(p.submission_date)}</span>
                   {p.eligibility_check_passed ? <span className="chip green">Eligible</span> : <span className="chip red">Not eligible</span>}
                 </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  {p.status === "Draft" && canEdit && <button className="btn btn-sm" disabled={busy} onClick={() => move(p, "Submitted")}>Submit for review</button>}
+                  {p.status === "Submitted" && isOffice && <button className="btn btn-sm" disabled={busy} onClick={() => move(p, "Under Review")}>Start review</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && DB.live && <button className="btn btn-green btn-sm" disabled={busy} onClick={() => setAward(awardDraft(p))}>Award grant</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-red btn-sm" disabled={busy} onClick={() => move(p, "Rejected")}>Reject</button>}
+                </div>
               </article>
             );
           })}
@@ -123,10 +197,57 @@ export default function Proposals({ user }) {
           </div>
           <div className="modal-foot">
             <button className="btn" onClick={() => setShowForm(false)}>Cancel</button>
-            <button className="btn btn-ink" onClick={submit}>Save draft</button>
+            <button className="btn btn-ink" disabled={busy} onClick={submit}>Save draft</button>
+          </div>
+        </Modal>
+      )}
+
+      {award && (
+        <Modal title="Award a grant" onClose={() => setAward(null)}>
+          <p style={{ color: "var(--ink-2)", marginBottom: 14 }}><strong style={{ color: "var(--ink)" }}>{award.proposal.title}</strong> asked for {inr(award.proposal.total_budget_requested)}.</p>
+          <div className="field-row">
+            <label className="field"><span>Funding agency</span>
+              <input className="input" autoFocus value={award.funding_agency} onChange={e => setAward({ ...award, funding_agency: e.target.value })} placeholder="Dept. of Science & Technology" />
+            </label>
+            <label className="field"><span>Agency contact</span>
+              <input className="input" value={award.agency_contact_info} onChange={e => setAward({ ...award, agency_contact_info: e.target.value })} placeholder="grants@dst.gov.in" />
+            </label>
+          </div>
+          <div className="field-row">
+            <label className="field"><span>Start date</span>
+              <input className="input" type="date" value={award.start_date} onChange={e => setAward({ ...award, start_date: e.target.value })} />
+            </label>
+            <label className="field"><span>End date</span>
+              <input className="input" type="date" value={award.end_date} onChange={e => setAward({ ...award, end_date: e.target.value })} />
+            </label>
+          </div>
+          <div className="field-row">
+            {award.heads.slice(0, 2).map(h => <HeadInput key={h.category} head={h} award={award} setAward={setAward} />)}
+          </div>
+          <div className="field-row">
+            {award.heads.slice(2).map(h => <HeadInput key={h.category} head={h} award={award} setAward={setAward} />)}
+          </div>
+          <div className="modal-checks">
+            One transaction writes <code>Grant_</code>, <code>Project</code> and <code>BudgetHead</code> and approves the proposal. If any row is refused, none of them stay.
+          </div>
+          <div className="modal-foot">
+            <button className="btn" onClick={() => setAward(null)}>Cancel</button>
+            <button className="btn btn-green" disabled={busy} onClick={confirmAward}>Award {inr(award.heads.reduce((t, h) => t + Number(h.allocated_amount), 0))}</button>
           </div>
         </Modal>
       )}
     </div>
+  );
+}
+
+function HeadInput({ head, award, setAward }) {
+  const change = value => setAward({
+    ...award,
+    heads: award.heads.map(h => h.category === head.category ? { ...h, allocated_amount: value } : h),
+  });
+  return (
+    <label className="field"><span>{head.category} (₹)</span>
+      <input className="input" type="number" value={head.allocated_amount} onChange={e => change(e.target.value)} />
+    </label>
   );
 }
