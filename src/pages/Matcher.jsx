@@ -1,87 +1,83 @@
-// Refined keyword TF-IDF weighting and faculty specialization match scores
 /**
- * Grant matcher. Scores open ExternalCall rows against a PI's specialisation
- * and stores the result in MATCHES (CHECK match_score BETWEEN 0 AND 100).
- * The search box runs a FULLTEXT query over User.specialization.
+ * Grant matcher, part of workflow W3. Both panels run on MySQL FULLTEXT:
+ *   Calls for a researcher: scores open ExternalCall rows against a PI's
+ *     specialisation and stores them in MATCHES (CHECK 0 to 100).
+ *   Researchers for a topic: MATCH ... AGAINST over User.specialization and
+ *     Proposal(abstract, title).
+ * The offline preview falls back to counting shared keywords.
  */
 
 import { useState } from "react";
+import { api } from "../api.js";
 import { DB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
-import { PageHead } from "../components/ui.jsx";
+import { PageHead, Notice } from "../components/ui.jsx";
+
+const words = text => (text || "").toLowerCase().match(/[a-z]{4,}/g) || [];
+
+function previewMatches(pi) {
+  const spec = new Set(words(pi.specialization));
+  const today = new Date().toISOString().split("T")[0];
+  const scored = DB.external_calls
+    .filter(c => c.deadline >= today)
+    .map(c => ({ ...c, hits: [...new Set(words(`${c.title} ${c.description} ${c.focus}`))].filter(w => spec.has(w)).length }))
+    .filter(c => c.hits > 0);
+  const best = Math.max(1, ...scored.map(c => c.hits));
+  return scored.map(c => ({ ...c, score: Math.round((c.hits / best) * 100) })).sort((a, b) => b.score - a.score);
+}
+
+function previewSearch(query) {
+  const terms = words(query);
+  const has = text => terms.some(t => (text || "").toLowerCase().includes(t));
+  return {
+    researchers: DB.users.filter(u => u.role === "PI" && has(u.specialization)),
+    proposals: DB.proposals.filter(p => has(`${p.title} ${p.abstract}`)),
+  };
+}
 
 export default function Matcher({ user }) {
-  const [matches, setMatches] = useState([]);
+  const [matches, setMatches] = useState(null);
   const [loading, setLoading] = useState(false);
   const [targetPI, setTargetPI] = useState(user.role === "PI" ? user : DB.users.find(u => u.role === "PI"));
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [aiText, setAiText] = useState("");
-  const [searchHits, setSearchHits] = useState(null);
+  const [hits, setHits] = useState(null);
+  const [error, setError] = useState(null);
 
-  function computeMatches(pi) {
-    setLoading(true); setMatches([]);
-    logSQL(`SELECT specialization FROM User WHERE user_id = ${pi.user_id};`, "Fetch PI profile");
-    logSQL(`SELECT call_id, title, focus FROM ExternalCall WHERE deadline >= CURDATE();`, "Load open calls");
-    setTimeout(() => {
-      const spec = (pi.specialization || "").toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
-      const scored = DB.external_calls.map(call => {
-        const focusWords = (call.focus || "").toLowerCase().split(",").map(s => s.trim());
-        const matched = spec.filter(s => focusWords.some(f => f.includes(s) || s.includes(f) || f.split(" ").some(w => w.length > 3 && s.includes(w))));
-        const score = Math.min(97, Math.round((matched.length / Math.max(spec.length, 1)) * 80 + Math.random() * 17));
-        return { ...call, score, matched };
-      }).sort((a, b) => b.score - a.score);
-      logSQL(`INSERT INTO MATCHES (call_id, user_id, match_score, notification_sent)\nSELECT call_id, ${pi.user_id}, computed_score, FALSE FROM computed_matches;`, "Persist match scores");
-      setMatches(scored);
+  async function computeMatches(pi) {
+    setLoading(true); setMatches(null); setError(null);
+    logSQL(`SELECT call_id, title FROM ExternalCall WHERE deadline >= CURDATE();\nSELECT MATCH(specialization) AGAINST (:call_text IN NATURAL LANGUAGE MODE)\nFROM User WHERE user_id = ${pi.user_id};`, "Score open calls");
+    try {
+      const rows = DB.live ? await api.matchCalls(pi.user_id) : previewMatches(pi);
+      logSQL(`INSERT INTO MATCHES (call_id, user_id, match_score, match_reason) VALUES (...)\nON DUPLICATE KEY UPDATE match_score = VALUES(match_score);`, "Persist match scores");
+      setMatches(rows);
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setLoading(false);
-    }, 900);
+    }
   }
 
-  async function semanticSearch() {
-    if (!query.trim()) return;
-    setSearching(true); setAiText(""); setSearchHits(null);
-    logSQL(`SELECT * FROM User WHERE MATCH(specialization) AGAINST ('${query}' IN NATURAL LANGUAGE MODE);`, "Full-text semantic search");
-
+  async function search() {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true); setHits(null); setError(null);
+    logSQL(`SELECT * FROM User WHERE MATCH(specialization) AGAINST ('${q}' IN NATURAL LANGUAGE MODE);\nSELECT * FROM Proposal WHERE MATCH(abstract, title) AGAINST ('${q}' IN NATURAL LANGUAGE MODE);`, "Full-text search");
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 600,
-          messages: [{
-            role: "user",
-            content: `You are UniGrant's AI research assistant. Answer the user's query about our researcher database.
-
-Query: "${query}"
-
-Researchers:
-${DB.users.filter(u => u.role === "PI").map(u => `- Prof. ${u.first_name} ${u.last_name} | Dept: ${DB.departments.find(d => d.dept_id === u.dept_id)?.dept_name} | Specialization: ${u.specialization}`).join("\n")}
-
-Active Projects:
-${DB.projects.map(p => `- "${p.project_title}" [${p.status}]: ${p.description}`).join("\n")}
-
-Give a concise 2–3 sentence answer identifying the most relevant researchers/projects and explaining why they match. Be specific.`,
-          }],
-        }),
-      });
-      const data = await res.json();
-      setAiText(data.content?.find(c => c.type === "text")?.text || "");
-    } catch {
-      setAiText("");
+      setHits(DB.live ? await api.search(q) : previewSearch(q));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSearching(false);
     }
-
-    const words = query.toLowerCase().split(" ").filter(w => w.length > 3);
-    const hits = DB.users.filter(u => u.role === "PI").filter(u => words.some(w => (u.specialization || "").toLowerCase().includes(w)));
-    const projHits = DB.projects.filter(p => words.some(w => p.project_title.toLowerCase().includes(w) || (p.description || "").toLowerCase().includes(w)));
-    setSearchHits([...hits.map(u => ({ type: "user", u })), ...projHits.map(p => ({ type: "project", p }))]);
-    setSearching(false);
   }
 
   const pis = DB.users.filter(u => u.role === "PI");
+  const nothing = hits && hits.researchers.length === 0 && hits.proposals.length === 0;
 
   return (
     <div>
       <PageHead title="Grant matcher" sub="Finds open funding calls that fit a researcher, and researchers that fit a topic." />
+      {error && <Notice tone="bad" title="MySQL refused this." onClose={() => setError(null)}>{error}</Notice>}
 
       <div className="grid-2">
         <section className="panel" style={{ alignSelf: "start" }}>
@@ -89,7 +85,7 @@ Give a concise 2–3 sentence answer identifying the most relevant researchers/p
           <div className="panel-body">
             {user.role === "Admin" && (
               <label className="field"><span>Researcher</span>
-                <select className="select" value={targetPI?.user_id} onChange={e => setTargetPI(DB.users.find(u => u.user_id === Number(e.target.value)))}>
+                <select className="select" value={targetPI?.user_id} onChange={e => { setTargetPI(DB.users.find(u => u.user_id === Number(e.target.value))); setMatches(null); }}>
                   {pis.map(p => <option key={p.user_id} value={p.user_id}>Prof. {fullName(p)}</option>)}
                 </select>
               </label>
@@ -103,22 +99,19 @@ Give a concise 2–3 sentence answer identifying the most relevant researchers/p
               {loading ? "Scoring open calls" : "Find matching calls"}
             </button>
           </div>
-          {matches.length > 0 && (
+          {matches && (
             <div className="panel-flush" style={{ borderTop: "1px solid var(--line)" }}>
               {matches.map(m => (
                 <div key={m.call_id} className="row">
                   <div className="row-main">
                     <div className="row-title">{m.title}</div>
                     <div className="row-sub">Closes {fmtDate(m.deadline)}, up to {inr(m.max_budget)}</div>
-                    {m.matched.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                        {m.matched.slice(0, 3).map(kw => <span key={kw} className="chip green">{kw}</span>)}
-                      </div>
-                    )}
+                    {m.focus && <div className="row-sub">{m.focus}</div>}
                   </div>
                   <div className={`score ${m.score > 70 ? "hi" : m.score > 45 ? "mid" : "lo"}`} title="match_score, 0 to 100">{m.score}</div>
                 </div>
               ))}
+              {matches.length === 0 && <p className="empty">No open call shares a term with this profile.</p>}
             </div>
           )}
         </section>
@@ -126,26 +119,33 @@ Give a concise 2–3 sentence answer identifying the most relevant researchers/p
         <section className="panel" style={{ alignSelf: "start" }}>
           <div className="panel-head"><h2>Researchers for a topic</h2><span>FULLTEXT on specialization</span></div>
           <div className="panel-body">
-            <form style={{ display: "flex", gap: 8 }} onSubmit={e => { e.preventDefault(); semanticSearch(); }}>
+            <form style={{ display: "flex", gap: 8 }} onSubmit={e => { e.preventDefault(); search(); }}>
               <input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder="solar energy grid storage" aria-label="Topic" />
               <button className="btn btn-ink" disabled={searching}>{searching ? "Searching" : "Search"}</button>
             </form>
-            <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-xs)", marginTop: 8 }}>Try "deep learning healthcare" or "renewable energy".</p>
-            {aiText && <p style={{ marginTop: 16, padding: "12px 14px", background: "var(--paper)", borderRadius: "var(--r)", lineHeight: 1.6 }}>{aiText}</p>}
+            <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-xs)", marginTop: 8 }}>Try "drug discovery" or "renewable energy".</p>
           </div>
-          {searchHits && (
+          {hits && (
             <div className="panel-flush" style={{ borderTop: "1px solid var(--line)" }}>
-              {searchHits.map((h, i) => (
-                <div key={i} className="row">
+              {hits.researchers.map(u => (
+                <div key={`u${u.user_id}`} className="row">
                   <div className="row-main">
-                    {h.type === "user"
-                      ? <><div className="row-title">Prof. {fullName(h.u)}</div><div className="row-sub">{h.u.specialization}</div></>
-                      : <><div className="row-title">{h.p.project_title}</div><div className="row-sub">{h.p.description}</div></>}
+                    <div className="row-title">Prof. {fullName(u)}</div>
+                    <div className="row-sub">{u.specialization}</div>
                   </div>
-                  <span className="chip">{h.type === "user" ? "User" : "Project"}</span>
+                  <span className="chip">Researcher</span>
                 </div>
               ))}
-              {searchHits.length === 0 && <p className="empty">No researcher or project mentions those words. Try a broader topic.</p>}
+              {hits.proposals.map(p => (
+                <div key={`p${p.proposal_id}`} className="row">
+                  <div className="row-main">
+                    <div className="row-title">{p.title}</div>
+                    <div className="row-sub">{p.status}</div>
+                  </div>
+                  <span className="chip">Proposal</span>
+                </div>
+              ))}
+              {nothing && <p className="empty">Nothing matches those words. Try a broader topic.</p>}
             </div>
           )}
         </section>
