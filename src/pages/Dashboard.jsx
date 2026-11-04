@@ -120,11 +120,13 @@ export default function Dashboard({ user, go }) {
                     </div>
                     <Status value={p.status} />
                   </div>
-                  <SplitBar {...m} />
-                  <div className="meter-line" style={{ marginTop: 6 }}>
-                    <span>{inr(m.spent)} spent{m.pending ? `, ${inr(m.pending)} waiting` : ""}</span>
-                    <span>{inr(m.alloc - m.spent)} left of {inr(m.alloc)}</span>
-                  </div>
+                  {user.role !== "Student" && <>
+                    <SplitBar {...m} />
+                    <div className="meter-line" style={{ marginTop: 6 }}>
+                      <span>{inr(m.spent)} spent{m.pending ? `, ${inr(m.pending)} waiting` : ""}</span>
+                      <span>{inr(m.alloc - m.spent)} left of {inr(m.alloc)}</span>
+                    </div>
+                  </>}
                 </div>
               );
             })}
