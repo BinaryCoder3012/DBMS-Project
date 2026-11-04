@@ -1,14 +1,16 @@
 {
   "name": "uni-grant",
   "version": "1.0.0",
-  "description": "A centralised DBMS for university research grant lifecycle management — from first proposal to final closure. Built with React (frontend) and MySQL 8.0+ (backend schema).",
+  "description": "UniGrant: research grant lifecycle management on MySQL. CS F212 Database Systems, BITS Pilani Hyderabad Campus, Group-25.",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "db:bundle": "node scripts/bundle-schema.cjs",
-    "db:seed": "python scripts/generate_seed.py"
+    "db:seed": "python scripts/generate_seed.py",
+    "server": "npm --prefix server start",
+    "test": "npm --prefix server test"
   },
   "keywords": [],
   "author": "",
