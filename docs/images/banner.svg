@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="UniGrant: every rupee, traced">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#1F3D31" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="320" fill="#0F241C"/>
+  <rect width="1280" height="320" fill="url(#grid)" opacity="0.55"/>
+
+  <!-- wordmark -->
+  <g transform="translate(72 66) scale(1.5)">
+    <rect x="3" y="18" width="20" height="9" rx="1.5" fill="#3E9C78"/>
+    <rect x="6" y="11" width="20" height="9" rx="1.5" fill="none" stroke="#E8EDE9" stroke-width="2"/>
+    <rect x="9" y="4" width="20" height="9" rx="1.5" fill="#E8EDE9"/>
+  </g>
+  <text x="130" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="30" font-weight="700" fill="#E8EDE9">UniGrant</text>
+  <text x="72" y="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="66" font-weight="800" fill="#FFFFFF" letter-spacing="-1.5">Every rupee, traced.</text>
+  <text x="72" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="23" fill="#B7C7BE">Research grant lifecycle management, with the rules enforced by the database.</text>
+  <text x="72" y="276" font-family="Consolas, Menlo, monospace" font-size="16" fill="#7FA893">CS F212 Database Systems · BITS Pilani, Hyderabad Campus · Group-25</text>
+
+  <!-- Chen-notation motif -->
+  <g font-family="Consolas, Menlo, monospace" font-size="15" text-anchor="middle">
+    <g stroke="#3E9C78" stroke-width="2" fill="none">
+      <path d="M1000 96H1072M1168 96H1192M1120 124V168M1120 224V250"/>
+    </g>
+    <g fill="#16332A" stroke="#E8EDE9" stroke-width="2">
+      <rect x="900" y="74" width="100" height="44" rx="3"/>
+      <rect x="1192" y="74" width="72" height="44" rx="3"/>
+      <rect x="1060" y="250" width="120" height="44" rx="3"/>
+    </g>
+    <g fill="#16332A" stroke="#3E9C78" stroke-width="2">
+      <path d="M1120 68L1172 96L1120 124L1068 96Z"/>
+      <path d="M1120 168L1172 196L1120 224L1068 196Z"/>
+    </g>
+    <g fill="#E8EDE9">
+      <text x="950" y="101">Proposal</text>
+      <text x="1228" y="101">Grant_</text>
+      <text x="1120" y="277">Expense</text>
+    </g>
+    <g fill="#9CC4B0" font-size="13">
+      <text x="1120" y="100">becomes</text>
+      <text x="1120" y="200">charged</text>
+    </g>
+  </g>
+</svg>
