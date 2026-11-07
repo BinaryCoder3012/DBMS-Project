@@ -1,10 +1,4 @@
-<div align="right">
-  <a href="https://unigrant.vercel.app/" target="_blank">
-    <img src="https://img.shields.io/badge/Deployed%20Site-unigrant.vercel.app-0070f3?style=for-the-badge&logo=vercel&logoColor=white" alt="Deployed Application" />
-  </a>
-  <br/>
-  🌐 <a href="https://unigrant.vercel.app/" target="_blank"><strong>https://unigrant.vercel.app/</strong></a>
-</div>
+
 
 <div align="center">
 
