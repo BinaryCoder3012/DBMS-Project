@@ -397,8 +397,8 @@ Everything the mid-semester report planned is in place.
 
 | Document | Contents |
 |---|---|
-| 📕 [Final design document (PDF)](docs/reports/Group-25_Database_Design.pdf) | The submission document: EER, schema, constraints, normalisation, decisions |
-| 📗 [Mid-semester report (PDF)](docs/reports/Group-25_Midsem_Report.pdf) | The original design and plan |
+|  [Final design document (PDF)](docs/reports/Group-25_Database_Design.pdf) | The submission document: EER, schema, constraints, normalisation, decisions |
+|  [Mid-semester report (PDF)](docs/reports/Group-25_Midsem_Report.pdf) | The original design and plan |
 | [ER / EER model](docs/er-model.md) | All diagrams and the relationship table |
 | [Relational schema](docs/relational-schema.md) | Mapping, keys, constraints, normalisation, assumptions |
 | [Data dictionary](docs/data-dictionary.md) | Every column of every table |
