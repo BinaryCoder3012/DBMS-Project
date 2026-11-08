@@ -30,7 +30,7 @@ These cover what the automated suite does not.
 | Check | Method | Result |
 |---|---|---|
 | One-step install | `mysql < unigrant_schema.sql` on an empty server | Exit 0, 19 tables, 11 CHECKs, 24 foreign keys |
-| Events fire | Rescheduled all three to run in one second | Notification written, 77 snapshot rows, expired grant closed |
+| Events fire | Rescheduled all three to run in one second | Notification written, 64 snapshot rows, expired grant closed |
 | Backup and restore | `mysqldump`, restored into a second database | Same expense total; 5 triggers, 2 procedures, 3 events restored |
 | W1 through the browser | Signed in as the officer, awarded a grant | ₹16,00,000 consistent across grant, project and 4 heads |
 | W2 through the browser | Signed in as the PI and the officer | Refusal text from MySQL on screen; balances updated |
