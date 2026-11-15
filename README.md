@@ -27,7 +27,7 @@
 
 ## Final submission
 
-> [!IMPORTANT]
+
 > **CS F212 final project submission: Group-25, Lab section P3**
 >
 > | | |
