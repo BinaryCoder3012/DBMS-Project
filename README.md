@@ -44,6 +44,16 @@ A research grant passes through many hands, and the costly mistakes are always t
 | **5** triggers | **4** views | **6** secondary indexes | **4** MySQL roles |
 | **2** stored procedures | **3** scheduled events | **6** analytical queries | **32** integration tests |
 
+## Final submission
+
+| | |
+|---|---|
+| **Team / lab section** | Group-25, P3 |
+| **Final commit** | Tagged **`final`** (`git checkout final`) |
+| **Final code commit hash** | `c046f0ca28484d201476f4d9a2e70ae2280cfe1f` |
+
+The `final` tag points to the commit that adds this section. That commit changes only this README, so the code, schema and line numbers are the same as in `c046f0c`.
+
 ## Technology stack
 
 | Layer | Technology |
