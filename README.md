@@ -19,9 +19,24 @@
 
 **CS F212 Database Systems · BITS Pilani, Hyderabad Campus · Group-25**
 
-[Quick start](#quick-start) · [Workflows](#three-end-to-end-workflows) · [Database](#database-design) · [Team](#team-and-contributions) · [Documentation](#documentation) · [Design document (PDF)](docs/reports/Group-25_Database_Design.pdf)
+[Final submission](#final-submission) · [Quick start](#quick-start) · [Workflows](#three-end-to-end-workflows) · [Database](#database-design) · [Team](#team-and-contributions) · [Documentation](#documentation) · [Design document (PDF)](docs/reports/Group-25_Database_Design.pdf)
 
 </div>
+
+---
+
+## Final submission
+
+> [!IMPORTANT]
+> **CS F212 final project submission: Group-25, Lab section P3**
+>
+> | | |
+> |---|---|
+> | **Final commit** | Git tag **`final`** (view it with `git checkout final`, or on GitHub under *Tags* &rarr; `final`) |
+> | **Last code commit** | `c046f0ca28484d201476f4d9a2e70ae2280cfe1f` |
+> | **Repository** | https://github.com/BinaryCoder3012/DBMS-Project |
+>
+> The `final` tag points to the commit that adds this section. That commit changes only this README, so the code, schema and line numbers are the same as in `c046f0c`. The design document and the demo sheet name the tagged commit.
 
 ---
 
@@ -43,16 +58,6 @@ A research grant passes through many hands, and the costly mistakes are always t
 | **19** relations | **11** CHECK constraints | **24** foreign keys | **1,335** seed records |
 | **5** triggers | **4** views | **6** secondary indexes | **4** MySQL roles |
 | **2** stored procedures | **3** scheduled events | **6** analytical queries | **32** integration tests |
-
-## Final submission
-
-| | |
-|---|---|
-| **Team / lab section** | Group-25, P3 |
-| **Final commit** | Tagged **`final`** (`git checkout final`) |
-| **Final code commit hash** | `c046f0ca28484d201476f4d9a2e70ae2280cfe1f` |
-
-The `final` tag points to the commit that adds this section. That commit changes only this README, so the code, schema and line numbers are the same as in `c046f0c`.
 
 ## Technology stack
 
