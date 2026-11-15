@@ -14,7 +14,7 @@
 ![Express](https://img.shields.io/badge/Express-4-1F5C45?style=flat-square&logo=express&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-1F5C45?style=flat-square&logo=react&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-1F5C45?style=flat-square&logo=vite&logoColor=white)
-![Tests](https://img.shields.io/badge/integration%20tests-39%20passing-1F5C45?style=flat-square)
+![Tests](https://img.shields.io/badge/integration%20tests-43%20passing-1F5C45?style=flat-square)
 ![Records](https://img.shields.io/badge/seed%20data-1%2C335%20records-1F5C45?style=flat-square)
 
 **CS F212 Database Systems · BITS Pilani, Hyderabad Campus · Group-25**
@@ -56,7 +56,7 @@ A research grant passes through many hands, and the costly mistakes are always t
 |:-:|:-:|:-:|:-:|
 | **19** relations | **11** CHECK constraints | **24** foreign keys | **1,335** seed records |
 | **5** triggers | **4** views | **6** secondary indexes | **4** MySQL roles |
-| **2** stored procedures | **3** scheduled events | **6** analytical queries | **39** integration tests |
+| **2** stored procedures | **3** scheduled events | **6** analytical queries | **43** integration tests |
 
 ## Technology stack
 
@@ -205,11 +205,15 @@ Every action below is checked twice: the API's role guard, and the MySQL role GR
 
 | Screen | PI | Grant officer | Student | Admin |
 |---|---|---|---|---|
-| **Proposals** | Write a proposal, **Edit** and **Delete draft** (own Drafts only), **Submit for review** | **Start review**, **Award grant**, **Reject** | Hidden | All PI and officer actions on any proposal |
-| **Expenses** | **Log an expense** on own projects | **Approve**, **Reject** (also reverses an approval) | Hidden | All |
+| **Overview** | **Notifications**: eligibility, award and expense decisions | **Notifications**: new submissions and expenses waiting | **Notifications**: added to a project | All of their own |
+| **Proposals** | Write a proposal, **Edit** and **Delete draft** (own Drafts only), **Submit for review** | **Start review**, **Mark eligible** / **Mark not eligible**, **Award grant** (only once eligible), **Reject** | Hidden | All PI and officer actions on any proposal |
+| **Projects** | Own projects; **Add team member**, **Remove** | Every project, read only | Assigned projects, no money | All; manage any team |
+| **Expenses** | **Log an expense**, **Withdraw** a Pending one | **Approve**, **Reject**, **Reverse** an approved one (money goes back) | Hidden | All |
 | **Milestones** | **Add milestone**, **Mark complete**, **Mark delayed**, **Report submitted**, **Reopen** on own projects | Hidden | Read only | All, on any project |
 | **Research outputs** | **Add research output**, change status (Submitted, Accepted, Published), **Delete** on own projects | Hidden | Read only, own projects | All, on any project |
 | **People, Departments** | Hidden | Hidden | Hidden | **Add person** (password stored as `SHA2`), **Add department**, **Delete department** (people and projects kept through `ON DELETE SET NULL`) |
+
+Every hand-off writes a notification for the person who acts next: a submitted proposal and a new expense reach the grant officers; the eligibility result, the award and each expense decision reach the PI; a new team member hears they were added.
 
 Only a **Draft** can be edited or deleted. Once a proposal is submitted, it and everything that hangs off it (grant, project, budget heads, expenses) can only change status, so the money trail stays complete for auditing. Delete buttons ask for a second click to confirm.
 
@@ -378,7 +382,7 @@ Everything the mid-semester report planned is in place.
 | React screens | ✅ Done for all four roles |
 | Queries Q1 to Q6, analytics, full-text matcher | ✅ Done |
 | Backup and recovery notes | ✅ Done, restore tested |
-| Integration testing | ✅ 39 tests on MySQL 8.0.46 |
+| Integration testing | ✅ 43 tests on MySQL 8.0.46 |
 
 <details>
 <summary><b>Build schedule</b></summary>

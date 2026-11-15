@@ -844,8 +844,8 @@ GRANT CREATE USER ON *.* TO admin_role;
 -- ════════════════════════════════════════════════════════════
 -- Proposals: full CRUD
 GRANT SELECT, INSERT, UPDATE, DELETE ON unigrant.Proposal       TO pi_role;  -- DELETE: own Drafts only (API)
--- Expenses: can create, view own; cannot approve
-GRANT SELECT, INSERT         ON unigrant.Expense        TO pi_role;
+-- Expenses: can create, view own, withdraw a Pending one; cannot approve
+GRANT SELECT, INSERT, DELETE ON unigrant.Expense        TO pi_role;
 -- Research outputs: create and view
 GRANT SELECT, INSERT, UPDATE, DELETE ON unigrant.ResearchOutput TO pi_role;
 -- Milestones: update completion status
@@ -859,6 +859,10 @@ GRANT SELECT                 ON unigrant.Grant_         TO pi_role;
 -- Dashboard view
 GRANT SELECT                 ON unigrant.PI_Dashboard_View TO pi_role;
 GRANT SELECT                 ON unigrant.Public_Project_View TO pi_role;
+-- Team: assign and remove people on own projects
+GRANT SELECT, INSERT, DELETE ON unigrant.WORKS_ON       TO pi_role;
+-- Notifications: read own, mark read, notify the next person in a workflow
+GRANT SELECT, INSERT, UPDATE (is_read) ON unigrant.Notification TO pi_role;
 
 -- ════════════════════════════════════════════════════════════
 --  ③ GRANT OFFICER ROLE — Finance Approval
@@ -866,12 +870,13 @@ GRANT SELECT                 ON unigrant.Public_Project_View TO pi_role;
 --  Project and BudgetHead rows are created only as part of an award.
 --  Explicitly BLOCKED from creating users or modifying schema.
 -- ════════════════════════════════════════════════════════════
-GRANT SELECT, UPDATE (status) ON unigrant.Proposal   TO grant_officer_role;
+GRANT SELECT, UPDATE (status, eligibility_check_passed) ON unigrant.Proposal TO grant_officer_role;
 GRANT SELECT, UPDATE          ON unigrant.Expense    TO grant_officer_role;
 GRANT SELECT, INSERT          ON unigrant.Grant_     TO grant_officer_role;
 GRANT SELECT, INSERT          ON unigrant.Project    TO grant_officer_role;
 GRANT SELECT, INSERT          ON unigrant.BudgetHead TO grant_officer_role;
 GRANT SELECT                  ON unigrant.Public_Project_View TO grant_officer_role;
+GRANT SELECT, INSERT, UPDATE (is_read) ON unigrant.Notification TO grant_officer_role;
 
 -- Explicitly revoke dangerous privilege (even if inherited from default)
 REVOKE CREATE USER ON *.* FROM grant_officer_role;
@@ -915,19 +920,21 @@ SET DEFAULT ROLE ALL TO
 -- ─────────────────────┼───────┼─────┼───────────────┼────────
 -- User                 |  ALL  |  —  |      —        |   —
 -- Department           |  ALL  |  —  |      —        |   —
--- Proposal             |  ALL  | SIU | S, U(status)  |   —
+-- Proposal             |  ALL  | SIUD| S, U(status, eligibility) | —
 -- Grant_               |  ALL  |  S  |     SI        |   —
 -- Project              |  ALL  |  S  |     SI        |   —
 -- BudgetHead           |  ALL  |  S  |     SI        |   —
--- Expense              |  ALL  | SI  |     SU        |   —
+-- Expense              |  ALL  | SID |     SU        |   —
 -- Milestone            |  ALL  | SIU |      —        |   —
--- ResearchOutput       |  ALL  | SI  |      —        |   —
+-- ResearchOutput       |  ALL  | SIUD|      —        |   —
+-- WORKS_ON             |  ALL  | SID |      —        |   —
+-- Notification         |  ALL  | SIU |     SIU       |   —
 -- Public_Project_View  |  ALL  |  S  |      S        |   S
 -- PI_Dashboard_View    |  ALL  |  S  |      —        |   —
 -- Admin_Analytics_View |  ALL  |  —  |      —        |   —
 -- Student_Project_View |  ALL  |  —  |      —        |   S
 -- ─────────────────────┴───────┴─────┴───────────────┴────────
--- S=SELECT, I=INSERT, U=UPDATE, ALL=all privileges
+-- S=SELECT, I=INSERT, U=UPDATE, D=DELETE, ALL=all privileges
 
 -- ════════════════════════════════════════════════════════════
 --  ROW-LEVEL SECURITY NOTES

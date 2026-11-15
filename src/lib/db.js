@@ -85,7 +85,16 @@ export const DB = {
     { user_id: 1, project_id: 1, role_in_project: "Lead Researcher", hours_per_week: 12, stipend_amount: 0 },
     { user_id: 5, project_id: 2, role_in_project: "Lead Researcher", hours_per_week: 14, stipend_amount: 0 },
   ],
+  notifications: [],
 };
+
+// Offline preview: the same hand-off messages the API writes to Notification.
+export function notifyLocal(userIds, message) {
+  for (const user_id of new Set(userIds.filter(Boolean))) {
+    DB.notifications.unshift({ notif_id: DB.notifications.length + 1, user_id, message, is_read: false, sent_at: new Date().toISOString() });
+  }
+}
+export const officerIds = () => DB.users.filter(u => u.role === "Grant_Officer").map(u => u.user_id);
 
 /* ═══════════════════════════════════════════════════════════════
    DB HYDRATION — replaces mock data with real rows from the API
@@ -96,11 +105,11 @@ export async function initDB() {
   const allowed = p => p.catch(err => { if (err.status === 403) return []; throw err; });
   const [users, departments, proposals, grants, projects,
          budgetHeads, expenses, milestones, researchOutputs,
-         externalCalls, worksOn] = await Promise.all([
+         externalCalls, worksOn, notifications] = await Promise.all([
     api.getUsers(), api.getDepartments(), allowed(api.getProposals()),
     allowed(api.getGrants()), api.getProjects(), allowed(api.getBudgetHeads()),
     allowed(api.getExpenses()), api.getMilestones(), api.getResearchOutputs(),
-    api.getExternalCalls(), api.getWorksOn(),
+    api.getExternalCalls(), api.getWorksOn(), api.getNotifications(),
   ]);
   DB.users            = users;
   DB.departments      = departments;
@@ -113,6 +122,7 @@ export async function initDB() {
   DB.research_outputs = researchOutputs;
   DB.external_calls   = externalCalls;
   DB.works_on         = worksOn;
+  DB.notifications    = notifications;
   DB.live             = true;
 }
 

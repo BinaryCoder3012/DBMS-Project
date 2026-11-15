@@ -291,7 +291,7 @@ const award = id => ({
 });
 
 test("W1: an award writes all four tables in one transaction", async () => {
-  const [[p]] = await db.query("SELECT proposal_id FROM Proposal WHERE status = 'Under Review' LIMIT 1");
+  const [[p]] = await db.query("SELECT proposal_id FROM Proposal WHERE status = 'Under Review' AND eligibility_check_passed LIMIT 1");
   const { status, body } = await http("POST", "/grants/award", "officer", award(p.proposal_id));
   assert.equal(status, 201);
   assert.equal(body.total, 1000000);
@@ -305,7 +305,7 @@ test("W1: an award writes all four tables in one transaction", async () => {
 });
 
 test("W1: a failed award rolls back every row", async () => {
-  const [[p]] = await db.query("SELECT proposal_id FROM Proposal WHERE status = 'Submitted' LIMIT 1");
+  const [[p]] = await db.query("SELECT proposal_id FROM Proposal WHERE status = 'Submitted' AND eligibility_check_passed LIMIT 1");
   const [[before]] = await db.query("SELECT (SELECT COUNT(*) FROM Grant_) AS g, (SELECT COUNT(*) FROM Project) AS p");
   const body = award(p.proposal_id);
   body.budget_heads[1].allocated_amount = -1; // the last insert breaks a CHECK
@@ -496,4 +496,64 @@ test("deleting a department keeps its people (ON DELETE SET NULL)", async () => 
   const [[row]] = await db.execute("SELECT dept_id FROM User WHERE user_id = ?", [u.insertId]);
   assert.equal(row.dept_id, null);
   assert.equal((await http("DELETE", `/departments/${body.dept_id}`, "admin")).status, 404);
+});
+
+// ── Hand-offs between roles ──────────────────────────────────────
+const unread = async userId => (await db.execute(
+  "SELECT message FROM Notification WHERE user_id = ? AND is_read = FALSE ORDER BY notif_id DESC", [userId]))[0];
+
+test("submit, eligibility, award: each step reaches the next person", async () => {
+  const id = await draftFor(2);
+  assert.equal((await http("PATCH", `/proposals/${id}/status`, "pi", { status: "Submitted" })).status, 200);
+  assert.match((await unread(6))[0].message, /Draft under test.*waiting for review/);   // Sneha, the officer
+  assert.equal((await http("PATCH", `/proposals/${id}/status`, "officer", { status: "Under Review" })).status, 200);
+  // not yet eligible: the award is refused and nothing is written
+  const refused = await http("POST", "/grants/award", "officer", award(id));
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /eligible/);
+  assert.equal((await http("PATCH", `/proposals/${id}/eligibility`, "pi", { eligible: true })).status, 403);
+  assert.equal((await http("PATCH", `/proposals/${id}/eligibility`, "officer", { eligible: true })).status, 200);
+  assert.equal((await http("POST", "/grants/award", "officer", award(id))).status, 201);
+  const pi = await unread(2);
+  assert.match(pi[0].message, /awarded a grant/);
+  assert.ok(pi.some(n => /marked eligible/.test(n.message)));
+  const mine = await http("GET", "/notifications", "pi");
+  assert.equal(mine.status, 200);
+  assert.ok(mine.body.length > 0);
+  assert.equal((await http("PATCH", "/notifications/read", "pi")).status, 200);
+  assert.equal((await unread(2)).length, 0);
+});
+
+test("a logged expense reaches the officer and the decision reaches the PI", async () => {
+  const head = await freshHead(50000);
+  const logged = await http("POST", "/expenses", "pi", { ...head, amount: 1000, receipt_reference: "HAND-1" });
+  assert.equal(logged.status, 201);
+  assert.match((await unread(6))[0].message, /waiting for approval/);
+  await http("PATCH", `/expenses/${logged.body.expense_id}/approve`, "officer");
+  assert.match((await unread(2))[0].message, /HAND-1.*approved/);
+  await http("PATCH", `/expenses/${logged.body.expense_id}/reject`, "officer");
+  assert.match((await unread(2))[0].message, /HAND-1.*reversed/);
+});
+
+test("a PI withdraws only their own Pending expense", async () => {
+  const head = await freshHead(50000);
+  const a = await pendingExpense(head, 1000, "WD-1"), b = await pendingExpense(head, 1000, "WD-2");
+  await http("PATCH", `/expenses/${b}/approve`, "officer");
+  assert.equal((await http("DELETE", `/expenses/${a}`, "officer")).status, 403);
+  assert.equal((await http("DELETE", `/expenses/${b}`, "pi")).status, 409);
+  assert.equal((await http("DELETE", `/expenses/${a}`, "pi")).status, 200);
+});
+
+test("a PI assigns and removes team members on their own project", async () => {
+  const { project_id } = await freshHead();
+  const add = await http("POST", `/projects/${project_id}/team`, "pi",
+    { user_id: 4, role_in_project: "Research Assistant", hours_per_week: 10, stipend_amount: 8000 });
+  assert.equal(add.status, 201);
+  assert.match((await unread(4))[0].message, /added to the project/);
+  const seen = await http("GET", "/projects", "student");
+  assert.ok(seen.body.some(p => p.project_id === project_id));
+  assert.equal((await http("POST", `/projects/${project_id}/team`, "pi", { user_id: 4 })).status, 409);
+  assert.equal((await http("POST", `/projects/${project_id}/team`, "student", { user_id: 5 })).status, 403);
+  assert.equal((await http("DELETE", `/projects/${project_id}/team/4`, "pi")).status, 200);
+  assert.equal((await http("DELETE", `/projects/${project_id}/team/4`, "pi")).status, 404);
 });

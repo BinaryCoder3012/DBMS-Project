@@ -35,6 +35,7 @@ Rows are narrowed to what the role may see.
 | PATCH | `/api/proposals/:id/status` | PI, Officer, Admin | Move along the life cycle |
 | PATCH | `/api/proposals/:id` | PI (own), Admin | Edit a Draft; CHECK constraints still apply |
 | DELETE | `/api/proposals/:id` | PI (own), Admin | Delete a Draft; any other status is refused with 409 |
+| PATCH | `/api/proposals/:id/eligibility` | Officer, Admin | Record the eligibility check; an award needs it passed |
 | POST | `/api/grants/award` | Officer, Admin | Transaction over four tables |
 
 Proposal life cycle:
@@ -86,6 +87,11 @@ Award request:
 | POST | `/api/research-outputs` | PI (own project), Admin | Add a publication, patent, prototype or report |
 | PATCH | `/api/research-outputs/:id` | PI (own project), Admin | Move to Submitted, Accepted or Published |
 | DELETE | `/api/research-outputs/:id` | PI (own project), Admin | Remove an output recorded by mistake |
+| POST | `/api/projects/:id/team` | PI (own project), Admin | Add a person to `WORKS_ON` |
+| DELETE | `/api/projects/:id/team/:userId` | PI (own project), Admin | Remove a person from the team |
+| DELETE | `/api/expenses/:id` | PI (own project), Admin | Withdraw a Pending expense |
+| GET | `/api/notifications` | All | The caller's notifications, newest first |
+| PATCH | `/api/notifications/read` | All | Mark all of the caller's notifications read |
 | POST | `/api/users` | Admin | Add a person; password stored as `SHA2(password, 256)`, email UNIQUE |
 | POST | `/api/departments` | Admin | Add a department |
 | DELETE | `/api/departments/:id` | Admin | Delete a department; `ON DELETE SET NULL` keeps its people and projects |

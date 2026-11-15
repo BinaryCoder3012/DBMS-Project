@@ -25,7 +25,7 @@ S = SELECT, I = INSERT, U = UPDATE.
 | Table or view | Admin | PI | Grant Officer | Student |
 |---|:-:|:-:|:-:|:-:|
 | User, Department | ALL | | | |
-| Proposal | ALL | S I U D | S, U(status) | |
+| Proposal | ALL | S I U D | S, U(status, eligibility_check_passed) | |
 | Grant_ | ALL | S | S I | |
 | Project | ALL | S | S I | |
 | BudgetHead | ALL | S | S I | |

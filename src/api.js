@@ -67,6 +67,7 @@ export const api = {
   setProposalStatus: (id, status) => send("PATCH", `/proposals/${id}/status`, { status }),
   awardGrant: data => send("POST", "/grants/award", data),
   updateProposal: (id, data) => send("PATCH", `/proposals/${id}`, data),
+  setEligibility: (id, eligible) => send("PATCH", `/proposals/${id}/eligibility`, { eligible }),
   deleteProposal: id => send("DELETE", `/proposals/${id}`),
 
   // ── Project records ───────────────────────────────────────────────────────
@@ -85,6 +86,13 @@ export const api = {
   createExpense: data => send("POST", "/expenses", data),
   approveExpense: id => send("PATCH", `/expenses/${id}/approve`),
   rejectExpense: id => send("PATCH", `/expenses/${id}/reject`),
+  withdrawExpense: id => send("DELETE", `/expenses/${id}`),
+
+  // ── Team and notifications ────────────────────────────────────────────────
+  addTeamMember: (projectId, data) => send("POST", `/projects/${projectId}/team`, data),
+  removeTeamMember: (projectId, userId) => send("DELETE", `/projects/${projectId}/team/${userId}`),
+  getNotifications: () => req("/notifications"),
+  markNotificationsRead: () => send("PATCH", "/notifications/read"),
 
   // ── Workflow W3: search and reports ───────────────────────────────────────
   search: q => req(`/search?q=${encodeURIComponent(q)}`),

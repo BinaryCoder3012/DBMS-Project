@@ -9,7 +9,7 @@ import { useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { api } from "../api.js";
-import { DB, initDB, logSQL, inr, fmtDate } from "../lib/db.js";
+import { DB, initDB, logSQL, inr, fmtDate, notifyLocal, officerIds } from "../lib/db.js";
 import { Status, PageHead, Notice, Modal } from "../components/ui.jsx";
 
 const FILTERS = ["All", "Pending", "Approved", "Rejected"];
@@ -76,6 +76,7 @@ export default function Expenses({ user }) {
     }
     const dbExp = DB.expenses.find(e => e.expense_id === id);
     if (dbExp) Object.assign(dbExp, { status: "Approved", approved_by: user.user_id });
+    notifyLocal([DB.projects.find(p => p.project_id === exp.project_id)?.pi_id], `Your expense ${exp.receipt_reference || "#" + id} of ${inr(exp.amount)} was approved.`);
     const dbHead = DB.budget_heads.find(b => b.budgethead_id === exp.budgethead_id);
     if (dbHead) Object.assign(dbHead, { spent_amount: Number(dbHead.spent_amount) + Number(exp.amount), remaining_balance: Number(dbHead.remaining_balance) - Number(exp.amount) });
     setExpenses([...DB.expenses]);
@@ -84,15 +85,35 @@ export default function Expenses({ user }) {
   }
 
   async function reject(id) {
-    logSQL(`UPDATE Expense SET status='Rejected' WHERE expense_id=${id};`, "Reject expense");
+    const exp = expenses.find(e => e.expense_id === id);
+    const reversing = exp.status === "Approved";
+    logSQL(`UPDATE Expense SET status='Rejected' WHERE expense_id=${id};${reversing ? "\n-- AFTER UPDATE trigger returns the amount to the budget head" : ""}`, reversing ? "Reverse an approved expense" : "Reject expense");
     const done = () => {
       setActed(id);
-      setMsg({ tone: "", title: `Expense #${id} rejected.`, text: "No money moved. The budget head is unchanged." });
+      setMsg(reversing
+        ? { tone: "", title: `Expense #${id} reversed.`, text: `${inr(exp.amount)} went back to its budget head.` }
+        : { tone: "", title: `Expense #${id} rejected.`, text: "No money moved. The budget head is unchanged." });
     };
     if (DB.live) return write(() => api.rejectExpense(id), done);
-
     const dbExp = DB.expenses.find(e => e.expense_id === id);
     if (dbExp) dbExp.status = "Rejected";
+    if (reversing) {
+      const dbHead = DB.budget_heads.find(b => b.budgethead_id === exp.budgethead_id);
+      if (dbHead) Object.assign(dbHead, { spent_amount: Number(dbHead.spent_amount) - Number(exp.amount), remaining_balance: Number(dbHead.remaining_balance) + Number(exp.amount) });
+      setBudgetHeads(DB.budget_heads.map(b => ({ ...b })));
+    }
+    notifyLocal([DB.projects.find(p => p.project_id === exp.project_id)?.pi_id], `Your expense ${exp.receipt_reference || "#" + id} of ${inr(exp.amount)} was ${reversing ? "reversed" : "rejected"}.`);
+    setExpenses([...DB.expenses]);
+    done();
+  }
+
+  async function withdraw(id) {
+    logSQL(`DELETE FROM Expense WHERE expense_id=${id} AND status='Pending';`, "Withdraw a pending expense");
+    const done = () => setMsg({ tone: "", title: "Expense withdrawn.", text: "It was still Pending, so no money had moved." });
+    if (DB.live) return write(() => api.withdrawExpense(id), done);
+    const gone = DB.expenses.find(e => e.expense_id === id);
+    notifyLocal(officerIds(), `The expense of ${inr(gone.amount)} on "${DB.projects.find(p => p.project_id === gone.project_id)?.project_title}" was withdrawn; no action is needed.`);
+    DB.expenses.splice(DB.expenses.findIndex(e => e.expense_id === id), 1);
     setExpenses([...DB.expenses]);
     done();
   }
@@ -122,7 +143,9 @@ export default function Expenses({ user }) {
       setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "The amount must be more than zero (chk_expense_amount)." });
       setShowForm(false); return;
     }
-    DB.expenses.push({ expense_id: DB.expenses.length + 1, ...form, amount: amt, budgethead_id: Number(form.budgethead_id), date: new Date().toISOString().split("T")[0], status: "Pending", approved_by: null });
+    const projTitle = DB.projects.find(p => p.project_id === Number(form.project_id))?.project_title;
+    notifyLocal(officerIds(), `An expense of ${inr(amt)} on "${projTitle}" is waiting for approval.`);
+    DB.expenses.push({ expense_id: Math.max(0, ...DB.expenses.map(e => e.expense_id)) + 1, ...form, project_id: Number(form.project_id), amount: amt, budgethead_id: Number(form.budgethead_id), date: new Date().toISOString().split("T")[0], status: "Pending", approved_by: null });
     setExpenses([...DB.expenses]);
     done();
   }
@@ -154,7 +177,7 @@ export default function Expenses({ user }) {
         <div className="tbl-wrap">
           <table className="tbl">
             <thead>
-              <tr><th>Receipt</th><th>What it was for</th><th>Project and head</th><th className="num">Amount</th><th>Date</th><th>Status</th>{canApprove && <th></th>}</tr>
+              <tr><th>Receipt</th><th>What it was for</th><th>Project and head</th><th className="num">Amount</th><th>Date</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {shown.map(e => {
@@ -168,18 +191,18 @@ export default function Expenses({ user }) {
                     <td className="num" style={{ fontWeight: 700 }}>{inr(e.amount)}</td>
                     <td className="nowrap">{fmtDate(e.date)}</td>
                     <td><Status value={e.status} /></td>
-                    {canApprove && (
-                      <td className="nowrap" style={{ textAlign: "right" }}>
-                        {e.status === "Pending" ? (
-                          <span style={{ display: "inline-flex", gap: 6 }}>
-                            <button className="btn btn-green btn-sm" disabled={busy} onClick={() => approve(e.expense_id)}>Approve</button>
-                            <button className="btn btn-red btn-sm" disabled={busy} onClick={() => reject(e.expense_id)}>Reject</button>
-                          </span>
-                        ) : acted === e.expense_id ? (
-                          <span data-stamp={e.expense_id} className={`stamp ${e.status === "Rejected" ? "rejected" : ""}`}>{e.status.toUpperCase()}</span>
-                        ) : null}
-                      </td>
-                    )}
+                    <td className="nowrap" style={{ textAlign: "right" }}>
+                      {acted === e.expense_id ? (
+                        <span data-stamp={e.expense_id} className={`stamp ${e.status === "Rejected" ? "rejected" : ""}`}>{e.status.toUpperCase()}</span>
+                      ) : (
+                        <span style={{ display: "inline-flex", gap: 6 }}>
+                          {canApprove && e.status === "Pending" && <button className="btn btn-green btn-sm" disabled={busy} onClick={() => approve(e.expense_id)}>Approve</button>}
+                          {canApprove && e.status === "Pending" && <button className="btn btn-red btn-sm" disabled={busy} onClick={() => reject(e.expense_id)}>Reject</button>}
+                          {canApprove && e.status === "Approved" && <button className="btn btn-sm" disabled={busy} title="Reject after approval; the money goes back" onClick={() => reject(e.expense_id)}>Reverse</button>}
+                          {canCreate && e.status === "Pending" && (user.role === "Admin" || proj?.pi_id === user.user_id) && <button className="btn btn-sm" disabled={busy} onClick={() => withdraw(e.expense_id)}>Withdraw</button>}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

@@ -151,6 +151,34 @@ app.post("/api/auth/login", route(async (req, res) => {
   res.json({ ...rows[0], token: issueToken(rows[0]) });
 }));
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+// Each hand-off (a proposal submitted, an expense waiting, a decision made) writes
+// a Notification row for whoever acts next, inside the same transaction.
+async function notify(conn, userIds, message) {
+  for (const id of new Set(userIds.filter(Boolean))) {
+    await conn.execute("INSERT INTO Notification (user_id, message) VALUES (?, ?)", [id, message]);
+  }
+}
+
+async function officers(conn) {
+  const [rows] = await conn.execute("SELECT user_id FROM User WHERE role = 'Grant_Officer'");
+  return rows.map(r => r.user_id);
+}
+
+// GET /api/notifications — the caller's own, newest first
+app.get("/api/notifications", auth, route(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT notif_id, message, is_read, sent_at FROM Notification
+     WHERE user_id = ? ORDER BY sent_at DESC, notif_id DESC LIMIT 50`, [req.user.user_id]);
+  res.json(rows.map(r => ({ ...r, is_read: !!r.is_read })));
+}));
+
+// PATCH /api/notifications/read — marks every notification of the caller read
+app.patch("/api/notifications/read", auth, route(async (req, res) => {
+  await pool.execute("UPDATE Notification SET is_read = TRUE WHERE user_id = ?", [req.user.user_id]);
+  res.json({ success: true });
+}));
+
 // ── Reads ─────────────────────────────────────────────────────────────────────
 // Every read below needs a session. Rows are narrowed to what the role may see.
 
@@ -261,7 +289,7 @@ app.post("/api/proposals", auth, allow("PI", "Admin"), route(async (req, res) =>
     `INSERT INTO Proposal
        (title, abstract, total_budget_requested, duration_months,
         submission_date, status, eligibility_check_passed, pi_id)
-     VALUES (?, ?, ?, ?, CURDATE(), 'Draft', TRUE, ?)`,
+     VALUES (?, ?, ?, ?, CURDATE(), 'Draft', FALSE, ?)`,
     [title ?? null, abstract || "", total_budget_requested ?? null, duration_months ?? null, pi_id ?? null]
   );
   res.status(201).json({ proposal_id: result.insertId });
@@ -284,7 +312,27 @@ app.patch("/api/proposals/:id/status", auth, allow(...STAFF), route(async (req, 
     const roles = NEXT_STATUS[proposal.status]?.[status];
     if (!roles) throw httpError(409, `A ${proposal.status} proposal cannot move to ${status}.`);
     if (!roles.includes(req.user.role)) throw httpError(403, `The ${req.user.role} role cannot make this change.`);
-    await conn.execute("UPDATE Proposal SET status = ? WHERE proposal_id = ?", [status, req.params.id]);
+    await conn.execute(
+      `UPDATE Proposal SET status = ?, submission_date = IF(? = 'Submitted', CURDATE(), submission_date)
+       WHERE proposal_id = ?`, [status, status, req.params.id]);
+    const [[p]] = await conn.execute("SELECT title FROM Proposal WHERE proposal_id = ?", [req.params.id]);
+    if (status === "Submitted") await notify(conn, await officers(conn), `Proposal "${p.title}" was submitted and is waiting for review.`);
+    else await notify(conn, [proposal.pi_id], `Your proposal "${p.title}" is now ${status}.`);
+  });
+  res.json({ success: true });
+}));
+
+// PATCH /api/proposals/:id/eligibility — the officer records the eligibility check.
+// A grant can only be awarded to a proposal that passed it.
+app.patch("/api/proposals/:id/eligibility", auth, allow(...OFFICE), route(async (req, res) => {
+  const eligible = !!req.body.eligible;
+  await transaction(async conn => {
+    const [[proposal]] = await conn.execute(
+      "SELECT status, pi_id, title FROM Proposal WHERE proposal_id = ? FOR UPDATE", [req.params.id]);
+    if (!proposal) throw httpError(404, "Proposal not found");
+    if (!["Submitted", "Under Review"].includes(proposal.status)) throw httpError(409, `A ${proposal.status} proposal is not being checked.`);
+    await conn.execute("UPDATE Proposal SET eligibility_check_passed = ? WHERE proposal_id = ?", [eligible, req.params.id]);
+    await notify(conn, [proposal.pi_id], `Your proposal "${proposal.title}" was marked ${eligible ? "eligible" : "not eligible"}.`);
   });
   res.json({ success: true });
 }));
@@ -393,6 +441,28 @@ app.delete("/api/research-outputs/:id", auth, allow("PI", "Admin"), route(async 
   res.json({ success: true });
 }));
 
+// POST /api/projects/:id/team — assign a student or researcher (WORKS_ON)
+app.post("/api/projects/:id/team", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { user_id, role_in_project, hours_per_week, stipend_amount } = req.body;
+  await ownProject(pool, req.params.id, req.user);
+  await pool.execute(
+    `INSERT INTO WORKS_ON (user_id, project_id, role_in_project, hours_per_week, stipend_amount)
+     VALUES (?, ?, ?, ?, ?)`,
+    [user_id ?? null, req.params.id, role_in_project || "Research Assistant", hours_per_week || null, Number(stipend_amount) || 0]);
+  const [[p]] = await pool.execute("SELECT project_title FROM Project WHERE project_id = ?", [req.params.id]);
+  await notify(pool, [user_id], `You were added to the project "${p.project_title}".`);
+  res.status(201).json({ success: true });
+}));
+
+// DELETE /api/projects/:id/team/:userId — remove someone from the team
+app.delete("/api/projects/:id/team/:userId", auth, allow("PI", "Admin"), route(async (req, res) => {
+  await ownProject(pool, req.params.id, req.user);
+  const [result] = await pool.execute(
+    "DELETE FROM WORKS_ON WHERE project_id = ? AND user_id = ?", [req.params.id, req.params.userId]);
+  if (!result.affectedRows) throw httpError(404, "That person is not on this project.");
+  res.json({ success: true });
+}));
+
 // ── Admin: people and departments ─────────────────────────────────────────────
 
 // POST /api/users — the password is stored as SHA2(password, 256), like the seed.
@@ -439,10 +509,13 @@ app.post("/api/grants/award", auth, allow(...OFFICE), route(async (req, res) => 
 
   const result = await transaction(async conn => {
     const [[proposal]] = await conn.execute(
-      `SELECT p.proposal_id, p.title, p.abstract, p.status, p.pi_id, u.dept_id
+      `SELECT p.proposal_id, p.title, p.abstract, p.status, p.pi_id, p.eligibility_check_passed, u.dept_id
        FROM Proposal p JOIN User u ON p.pi_id = u.user_id
        WHERE p.proposal_id = ? FOR UPDATE`, [proposal_id ?? null]);
     if (!proposal) throw httpError(404, "Proposal not found");
+    if (["Submitted", "Under Review"].includes(proposal.status) && !proposal.eligibility_check_passed) {
+      throw httpError(409, "Mark the proposal eligible before awarding a grant.");
+    }
     if (!["Submitted", "Under Review"].includes(proposal.status)) {
       throw httpError(409, `A ${proposal.status} proposal cannot be awarded.`);
     }
@@ -473,6 +546,7 @@ app.post("/api/grants/award", auth, allow(...OFFICE), route(async (req, res) => 
     }
 
     await conn.execute("UPDATE Proposal SET status = 'Approved' WHERE proposal_id = ?", [proposal.proposal_id]);
+    await notify(conn, [proposal.pi_id], `Your proposal "${proposal.title}" was awarded a grant of Rs ${total.toLocaleString("en-IN")}. Its project is now active.`);
     return { grant_id: grant.insertId, project_id: project.insertId, total };
   });
   res.status(201).json(result);
@@ -498,6 +572,8 @@ app.post("/api/expenses", auth, allow("PI", "Admin"), route(async (req, res) => 
      VALUES (?, ?, ?, ?, ?, 'Pending', CURDATE())`,
     [project_id ?? null, budgethead_id ?? null, amount ?? null, description || "", receipt_reference || ""]
   );
+  const [[proj]] = await pool.execute("SELECT project_title FROM Project WHERE project_id = ?", [project_id]);
+  await notify(pool, await officers(pool), `An expense of Rs ${Number(amount).toLocaleString("en-IN")} on "${proj?.project_title}" is waiting for approval.`);
   res.status(201).json({ expense_id: result.insertId });
 }));
 
@@ -522,6 +598,7 @@ app.patch("/api/expenses/:id/approve", auth, allow(...OFFICE), route(async (req,
        SET status = 'Approved', approved_by = ?, approval_date = CURDATE()
        WHERE expense_id = ?`,
       [req.user.user_id, req.params.id]);
+    await notifyExpense(conn, req.params.id, "approved");
   });
   res.json({ success: true });
 }));
@@ -535,6 +612,30 @@ app.patch("/api/expenses/:id/reject", auth, allow(...OFFICE), route(async (req, 
     if (!expense) throw httpError(404, "Expense not found");
     if (expense.status === "Rejected") throw httpError(409, "This expense is already Rejected.");
     await conn.execute("UPDATE Expense SET status = 'Rejected' WHERE expense_id = ?", [req.params.id]);
+    await notifyExpense(conn, req.params.id, expense.status === "Approved" ? "reversed (the money went back to its budget head)" : "rejected");
+  });
+  res.json({ success: true });
+}));
+
+async function notifyExpense(conn, id, what) {
+  const [[e]] = await conn.execute(
+    `SELECT e.amount, e.receipt_reference, p.project_title, p.pi_id
+     FROM Expense e JOIN Project p ON e.project_id = p.project_id WHERE e.expense_id = ?`, [id]);
+  await notify(conn, [e.pi_id], `Your expense ${e.receipt_reference || "#" + id} of Rs ${Number(e.amount).toLocaleString("en-IN")} on "${e.project_title}" was ${what}.`);
+}
+
+// DELETE /api/expenses/:id — the PI withdraws a Pending expense. No money had
+// moved, so nothing else changes; approved expenses can only be reversed.
+app.delete("/api/expenses/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  await transaction(async conn => {
+    const [[e]] = await conn.execute(
+      `SELECT e.status, e.amount, p.pi_id, p.project_title FROM Expense e JOIN Project p ON e.project_id = p.project_id
+       WHERE e.expense_id = ? FOR UPDATE`, [req.params.id]);
+    if (!e) throw httpError(404, "Expense not found");
+    if (req.user.role === "PI" && e.pi_id !== req.user.user_id) throw httpError(403, "This is not your expense.");
+    if (e.status !== "Pending") throw httpError(409, `A ${e.status} expense cannot be withdrawn.`);
+    await conn.execute("DELETE FROM Expense WHERE expense_id = ?", [req.params.id]);
+    await notify(conn, await officers(conn), `The expense of Rs ${Number(e.amount).toLocaleString("en-IN")} on "${e.project_title}" was withdrawn; no action is needed.`);
   });
   res.json({ success: true });
 }));

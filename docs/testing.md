@@ -2,7 +2,7 @@
 
 ## Automated suite
 
-[`server/test/integration.test.js`](../server/test/integration.test.js) runs real SQL and real HTTP requests against a real MySQL server, with 39 cases.
+[`server/test/integration.test.js`](../server/test/integration.test.js) runs real SQL and real HTTP requests against a real MySQL server, with 43 cases.
 
 ```bash
 mysql -u root -p < unigrant_schema.sql   # the tests change rows, so start fresh
@@ -21,7 +21,7 @@ npm test
 | W2 | Six concurrent approvals on one head: three pass, three refused, no overspend; one expense approved three times at once counts once; the CHECK backstop holds for clients that skip the API |
 | W3 | Q1 to Q6 return rows; Q6 recurses past one level; FULLTEXT ranks the right researcher first; scores persist in `MATCHES` |
 
-Result on MySQL 8.0.46: **39 passed, 0 failed.**
+Result on MySQL 8.0.46: **43 passed, 0 failed.**
 
 ## Checks run by hand
 

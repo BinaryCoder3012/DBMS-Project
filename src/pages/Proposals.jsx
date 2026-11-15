@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { api } from "../api.js";
-import { DB, initDB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
+import { DB, initDB, logSQL, inr, fmtDate, fullName, notifyLocal, officerIds } from "../lib/db.js";
 import { Status, PageHead, Notice, Modal } from "../components/ui.jsx";
 import { DeleteButton } from "./Records.jsx";
 
@@ -129,7 +129,7 @@ WHERE proposal_id=${editing} AND status='Draft';`, "Edit a draft");
       setShowForm(false); return;
     }
     if (badForm()) return;
-    const np = { proposal_id: Math.max(0, ...DB.proposals.map(x => x.proposal_id)) + 1, ...form, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months), submission_date: new Date().toISOString().split("T")[0], status: "Draft", eligibility_check_passed: true, pi_id: user.user_id };
+    const np = { proposal_id: Math.max(0, ...DB.proposals.map(x => x.proposal_id)) + 1, ...form, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months), submission_date: new Date().toISOString().split("T")[0], status: "Draft", eligibility_check_passed: false, pi_id: user.user_id };
     DB.proposals.push(np);
     setProposals([...DB.proposals]);
     setFresh(np.proposal_id);
@@ -145,8 +145,23 @@ WHERE proposal_id=${editing} AND status='Draft';`, "Edit a draft");
       return;
     }
     Object.assign(DB.proposals.find(x => x.proposal_id === p.proposal_id), { status });
+    if (status === "Submitted") notifyLocal(officerIds(), `Proposal "${p.title}" was submitted and is waiting for review.`);
+    else notifyLocal([p.pi_id], `Your proposal "${p.title}" is now ${status}.`);
     setProposals([...DB.proposals]);
     setMsg({ tone: "", title: `Moved to ${status}.`, text: p.title });
+  }
+
+  async function checkEligibility(p, eligible) {
+    logSQL(`UPDATE Proposal SET eligibility_check_passed=${eligible ? "TRUE" : "FALSE"} WHERE proposal_id=${p.proposal_id};`, "Eligibility check");
+    const text = `${p.title} is ${eligible ? "eligible. It can now be awarded a grant." : "not eligible. It cannot be awarded until this changes."}`;
+    if (DB.live) {
+      if (await write(() => api.setEligibility(p.proposal_id, eligible))) setMsg({ tone: eligible ? "good" : "", title: eligible ? "Marked eligible." : "Marked not eligible.", text });
+      return;
+    }
+    Object.assign(DB.proposals.find(x => x.proposal_id === p.proposal_id), { eligibility_check_passed: eligible });
+    notifyLocal([p.pi_id], `Your proposal "${p.title}" was marked ${eligible ? "eligible" : "not eligible"}.`);
+    setProposals([...DB.proposals]);
+    setMsg({ tone: eligible ? "good" : "", title: eligible ? "Marked eligible." : "Marked not eligible.", text });
   }
 
   async function confirmAward() {
@@ -171,6 +186,7 @@ WHERE proposal_id=${editing} AND status='Draft';`, "Edit a draft");
       DB.projects.push({ project_id, project_title: proposal.title, description: proposal.abstract, start_date: fields.start_date, end_date: fields.end_date, status: "Active", current_balance: total, department_id: pi?.dept_id ?? null, grant_id, pi_id: proposal.pi_id });
       budget_heads.forEach(h => DB.budget_heads.push({ budgethead_id: next(DB.budget_heads, "budgethead_id"), project_id, category: h.category, allocated_amount: Number(h.allocated_amount), spent_amount: 0, remaining_balance: Number(h.allocated_amount) }));
       Object.assign(DB.proposals.find(x => x.proposal_id === proposal.proposal_id), { status: "Approved" });
+      notifyLocal([proposal.pi_id], `Your proposal "${proposal.title}" was awarded a grant of ${inr(total)}. Its project is now active.`);
       setProposals([...DB.proposals]);
       result = { total };
     }
@@ -217,14 +233,16 @@ WHERE proposal_id=${editing} AND status='Draft';`, "Edit a draft");
                   <span>{inr(p.total_budget_requested)}</span>
                   <span>{p.duration_months} months</span>
                   <span>Submitted {fmtDate(p.submission_date)}</span>
-                  {p.eligibility_check_passed ? <span className="chip green">Eligible</span> : <span className="chip red">Not eligible</span>}
+                  {p.eligibility_check_passed ? <span className="chip green">Eligible</span> : <span className="chip red">{["Draft", "Submitted", "Under Review"].includes(p.status) ? "Eligibility not confirmed" : "Not eligible"}</span>}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   {p.status === "Draft" && canEdit && <button className="btn btn-ink btn-sm" disabled={busy} onClick={() => move(p, "Submitted")}>Submit for review</button>}
                   {p.status === "Draft" && canEdit && <button className="btn btn-sm" disabled={busy} onClick={() => openEdit(p)}>Edit</button>}
                   {p.status === "Draft" && canEdit && <DeleteButton label="Delete draft" busy={busy} onDelete={() => remove(p)} />}
                   {p.status === "Submitted" && isOffice && <button className="btn btn-sm" disabled={busy} onClick={() => move(p, "Under Review")}>Start review</button>}
-                  {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-green btn-sm" disabled={busy} onClick={() => setAward(awardDraft(p))}>Award grant</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && !p.eligibility_check_passed && <button className="btn btn-sm" disabled={busy} onClick={() => checkEligibility(p, true)}>Mark eligible</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && p.eligibility_check_passed && <button className="btn btn-sm" disabled={busy} onClick={() => checkEligibility(p, false)}>Mark not eligible</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-green btn-sm" disabled={busy || !p.eligibility_check_passed} title={p.eligibility_check_passed ? "" : "Mark the proposal eligible first"} onClick={() => setAward(awardDraft(p))}>Award grant</button>}
                   {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-red btn-sm" disabled={busy} onClick={() => move(p, "Rejected")}>Reject</button>}
                 </div>
               </article>

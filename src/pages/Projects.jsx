@@ -4,8 +4,9 @@
  */
 
 import { useState } from "react";
-import { DB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
-import { Status, Meter, Figure, PageHead, Notice, Avatar } from "../components/ui.jsx";
+import { api } from "../api.js";
+import { DB, initDB, logSQL, inr, fmtDate, fullName, notifyLocal } from "../lib/db.js";
+import { Status, Meter, Figure, PageHead, Notice, Avatar, Modal } from "../components/ui.jsx";
 import { visibleProjects, projectMoney, SplitBar } from "./Dashboard.jsx";
 
 export default function Projects({ user, focusId, clearFocus }) {
@@ -21,7 +22,7 @@ export default function Projects({ user, focusId, clearFocus }) {
   }
 
   const selected = mine.find(p => p.project_id === selectedId);
-  if (selected) return <ProjectDetail p={selected} isReadOnly={isReadOnly} onBack={() => { setSelectedId(null); clearFocus?.(); }} />;
+  if (selected) return <ProjectDetail p={selected} user={user} isReadOnly={isReadOnly} onBack={() => { setSelectedId(null); clearFocus?.(); }} />;
 
   const shown = mine.filter(p => !q || (p.project_title + " " + p.description).toLowerCase().includes(q.toLowerCase()));
 
@@ -65,7 +66,50 @@ export default function Projects({ user, focusId, clearFocus }) {
   );
 }
 
-function ProjectDetail({ p, isReadOnly, onBack }) {
+const ROLES_IN_PROJECT = ["Research Assistant", "Team Member", "Lead Researcher"];
+
+function ProjectDetail({ p, user, isReadOnly, onBack }) {
+  const canManage = user.role === "Admin" || (user.role === "PI" && p.pi_id === user.user_id);
+  const [, setTick] = useState(0);
+  const [form, setForm] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(sql, live, offline, ok) {
+    logSQL(sql, ok.title);
+    setBusy(true);
+    try {
+      if (DB.live) { await live(); await initDB(); }
+      else { const refusal = offline(); if (refusal) { setMsg({ tone: "bad", title: "MySQL would refuse this.", text: refusal }); return; } }
+      setMsg({ tone: "good", ...ok });
+    } catch (err) {
+      setMsg({ tone: "bad", title: "MySQL refused this.", text: err.message });
+    } finally { setBusy(false); setTick(t => t + 1); }
+  }
+
+  function addMember() {
+    const f = { user_id: Number(form.user_id), role_in_project: form.role_in_project, hours_per_week: Number(form.hours_per_week) || null, stipend_amount: Number(form.stipend_amount) || 0 };
+    const who = DB.users.find(u => u.user_id === f.user_id);
+    run(`INSERT INTO WORKS_ON (user_id, project_id, role_in_project, hours_per_week, stipend_amount)\nVALUES (${f.user_id}, ${p.project_id}, '${f.role_in_project}', ${f.hours_per_week}, ${f.stipend_amount});`,
+      () => api.addTeamMember(p.project_id, f),
+      () => {
+        if (!f.user_id) return "Choose a person.";
+        if (DB.works_on.some(w => w.user_id === f.user_id && w.project_id === p.project_id)) return `Duplicate entry '${f.user_id}-${p.project_id}' for key 'WORKS_ON.PRIMARY'.`;
+        DB.works_on.push({ ...f, project_id: p.project_id });
+        notifyLocal([f.user_id], `You were added to the project "${p.project_title}".`);
+      },
+      { title: "Added to the team.", text: `${fullName(who)} now sees this project.` });
+    setForm(null);
+  }
+
+  function removeMember(w) {
+    const who = DB.users.find(u => u.user_id === w.user_id);
+    run(`DELETE FROM WORKS_ON WHERE project_id=${p.project_id} AND user_id=${w.user_id};`,
+      () => api.removeTeamMember(p.project_id, w.user_id),
+      () => { DB.works_on.splice(DB.works_on.findIndex(x => x.user_id === w.user_id && x.project_id === p.project_id), 1); },
+      { title: "Removed from the team.", text: fullName(who) });
+  }
+
   const heads = DB.budget_heads.filter(b => b.project_id === p.project_id);
   const miles = DB.milestones.filter(m => m.project_id === p.project_id);
   const outputs = DB.research_outputs.filter(o => o.project_id === p.project_id);
@@ -78,6 +122,7 @@ function ProjectDetail({ p, isReadOnly, onBack }) {
       <button className="link-btn" onClick={onBack} style={{ marginBottom: 16 }}>Back to projects</button>
       <PageHead title={p.project_title} sub={p.description}><Status value={p.status} /></PageHead>
 
+      {msg && <Notice tone={msg.tone} title={msg.title} onClose={() => setMsg(null)}>{msg.text}</Notice>}
       <div className="figures">
         {!isReadOnly && <Figure value={inr(p.current_balance)} label="Current balance" sub="CHECK (current_balance ≥ 0)" />}
         {!isReadOnly && <Figure value={inr(m.alloc - m.spent)} label="Left across heads" sub={`${inr(m.spent)} spent of ${inr(m.alloc)}`} />}
@@ -102,7 +147,9 @@ function ProjectDetail({ p, isReadOnly, onBack }) {
           </section>
         )}
         <section className="panel">
-          <div className="panel-head"><h2>Team</h2><span>WORKS_ON</span></div>
+          <div className="panel-head"><h2>Team</h2>{canManage
+            ? <button className="btn btn-sm" onClick={() => setForm({ user_id: "", role_in_project: "Research Assistant", hours_per_week: "10", stipend_amount: "" })}>Add team member</button>
+            : <span>WORKS_ON</span>}</div>
           <div className="panel-flush">
             {team.map(w => {
               const u = DB.users.find(x => x.user_id === w.user_id);
@@ -113,7 +160,10 @@ function ProjectDetail({ p, isReadOnly, onBack }) {
                     <Avatar user={u} />
                     <div><div className="who-name">{fullName(u)}</div><div className="who-sub">{w.role_in_project}, {w.hours_per_week} h a week</div></div>
                   </div>
-                  {!isReadOnly && <span style={{ fontWeight: 600 }}>{Number(w.stipend_amount) ? `${inr(w.stipend_amount)} a month` : "No stipend"}</span>}
+                  <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                    {!isReadOnly && <span style={{ fontWeight: 600 }}>{Number(w.stipend_amount) ? `${inr(w.stipend_amount)} a month` : "No stipend"}</span>}
+                    {canManage && w.user_id !== p.pi_id && <button className="btn btn-sm" disabled={busy} onClick={() => removeMember(w)}>Remove</button>}
+                  </span>
                 </div>
               );
             })}
@@ -164,6 +214,31 @@ function ProjectDetail({ p, isReadOnly, onBack }) {
           ) : <p className="empty">No outputs linked yet. Papers and patents appear here once they're recorded.</p>}
         </div>
       </section>
+
+      {form && (
+        <Modal title="Add a team member" onClose={() => setForm(null)}>
+          <label className="field"><span>Person</span>
+            <select className="select" value={form.user_id} onChange={e => setForm({ ...form, user_id: e.target.value })}>
+              <option value="">Choose a student or researcher</option>
+              {DB.users.filter(u => ["Student", "PI"].includes(u.role) && !team.some(w => w.user_id === u.user_id))
+                .map(u => <option key={u.user_id} value={u.user_id}>{fullName(u)} ({u.role === "PI" ? "PI" : "Student"})</option>)}
+            </select>
+          </label>
+          <label className="field"><span>Role in project</span>
+            <select className="select" value={form.role_in_project} onChange={e => setForm({ ...form, role_in_project: e.target.value })}>
+              {ROLES_IN_PROJECT.map(r => <option key={r}>{r}</option>)}
+            </select>
+          </label>
+          <div className="field-row">
+            <label className="field"><span>Hours a week</span><input className="input" type="number" min="1" value={form.hours_per_week} onChange={e => setForm({ ...form, hours_per_week: e.target.value })} /></label>
+            <label className="field"><span>Monthly stipend</span><input className="input" type="number" min="0" value={form.stipend_amount} onChange={e => setForm({ ...form, stipend_amount: e.target.value })} /></label>
+          </div>
+          <div className="modal-foot">
+            <button className="btn" onClick={() => setForm(null)}>Cancel</button>
+            <button className="btn btn-ink" disabled={busy || !form.user_id} onClick={addMember}>Add to team</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

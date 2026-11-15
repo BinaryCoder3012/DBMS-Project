@@ -53,6 +53,7 @@ export const NAV = {
     { id: "expenses", label: "Expense approvals" },
     { id: "grants", label: "Grants" },
     { id: "proposals", label: "Proposals" },
+    { id: "projects", label: "Projects" },
     { section: "Reference" },
     { id: "schema", label: "Schema" },
   ],

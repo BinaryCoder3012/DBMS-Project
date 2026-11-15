@@ -3,8 +3,9 @@
  * (COUNT of active projects, SUM of awards, milestones due in 30 days).
  */
 
-import { useEffect } from "react";
-import { DB, logSQL, inr, inrShort, fmtDate, daysUntil, fullName } from "../lib/db.js";
+import { useEffect, useState } from "react";
+import { api } from "../api.js";
+import { DB, initDB, logSQL, inr, inrShort, fmtDate, daysUntil, fullName } from "../lib/db.js";
 import { Status, Figure, PageHead, Notice } from "../components/ui.jsx";
 
 export function visibleProjects(user) {
@@ -134,6 +135,8 @@ export default function Dashboard({ user, go }) {
           </div>
         </section>
 
+        <Inbox user={user} />
+
         <section className="panel">
           <div className="panel-head"><h2>Due next</h2><span>milestone_30day_alert runs nightly</span></div>
           <div className="panel-flush">
@@ -160,5 +163,39 @@ export default function Dashboard({ user, go }) {
         </section>
       </div>
     </div>
+  );
+}
+
+// Notifications: each hand-off between roles (a proposal submitted, an expense
+// waiting, a decision made) lands here for the person who acts next.
+function Inbox({ user }) {
+  const [, setTick] = useState(0);
+  const mine = DB.notifications.filter(n => DB.live || n.user_id === user.user_id);
+  const unread = mine.filter(n => !n.is_read).length;
+  async function readAll() {
+    logSQL(`UPDATE Notification SET is_read = TRUE WHERE user_id = ${user.user_id};`, "Mark notifications read");
+    if (DB.live) { try { await api.markNotificationsRead(); await initDB(); } catch { /* the list just stays as it is */ } }
+    else mine.forEach(n => { n.is_read = true; });
+    setTick(t => t + 1);
+  }
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Notifications{unread ? ` (${unread} new)` : ""}</h2>
+        {unread > 0 ? <button className="btn btn-sm" onClick={readAll}>Mark all read</button> : <span>Notification</span>}
+      </div>
+      <div className="panel-flush" style={{ maxHeight: 320, overflowY: "auto" }}>
+        {mine.slice(0, 20).map(n => (
+          <div key={n.notif_id} className="row">
+            <div className="row-main">
+              <div className="row-title" style={{ fontWeight: n.is_read ? 400 : 700 }}>{n.message}</div>
+              <div className="row-sub">{fmtDate(n.sent_at)}</div>
+            </div>
+            {!n.is_read && <span className="chip green">New</span>}
+          </div>
+        ))}
+        {mine.length === 0 && <p className="empty">Nothing new. You will see submissions, decisions and reminders here.</p>}
+      </div>
+    </section>
   );
 }
