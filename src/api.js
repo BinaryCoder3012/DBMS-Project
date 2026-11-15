@@ -66,6 +66,20 @@ export const api = {
   createProposal: data => send("POST", "/proposals", data),
   setProposalStatus: (id, status) => send("PATCH", `/proposals/${id}/status`, { status }),
   awardGrant: data => send("POST", "/grants/award", data),
+  updateProposal: (id, data) => send("PATCH", `/proposals/${id}`, data),
+  deleteProposal: id => send("DELETE", `/proposals/${id}`),
+
+  // ── Project records ───────────────────────────────────────────────────────
+  createMilestone: data => send("POST", "/milestones", data),
+  updateMilestone: (id, data) => send("PATCH", `/milestones/${id}`, data),
+  createOutput: data => send("POST", "/research-outputs", data),
+  setOutputStatus: (id, status) => send("PATCH", `/research-outputs/${id}`, { status }),
+  deleteOutput: id => send("DELETE", `/research-outputs/${id}`),
+
+  // ── Admin: people and departments ─────────────────────────────────────────
+  createUser: data => send("POST", "/users", data),
+  createDepartment: data => send("POST", "/departments", data),
+  deleteDepartment: id => send("DELETE", `/departments/${id}`),
 
   // ── Workflow W2: expenses ─────────────────────────────────────────────────
   createExpense: data => send("POST", "/expenses", data),

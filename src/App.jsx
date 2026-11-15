@@ -60,7 +60,7 @@ export default function UniGrant() {
     expenses:    <Expenses user={user} />,
     grants:      <Grants />,
     milestones:  <Milestones user={user} />,
-    outputs:     <Outputs />,
+    outputs:     <Outputs user={user} />,
     dba:         <DBA user={user} />,
     ai:          <Matcher user={user} />,
     analytics:   <Analytics user={user} />,

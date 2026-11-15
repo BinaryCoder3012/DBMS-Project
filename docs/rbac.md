@@ -14,7 +14,7 @@ The API connects through one pooled service account, so MySQL cannot tell which 
 | Application role | MySQL role | Who | Needs |
 |---|---|---|---|
 | Admin | `admin_role` | Research office | University-wide analytics, user management |
-| PI | `pi_role` | Faculty | Submit proposals, log expenses, update milestones |
+| PI | `pi_role` | Faculty | Write, edit, delete (Drafts) and submit proposals; log expenses; add and update milestones and research outputs |
 | Grant Officer | `grant_officer_role` | Finance, compliance | Review proposals, award grants, approve or reject expenses |
 | Student | `student_role` | Research assistants | Read assigned projects, no financial data |
 
@@ -25,13 +25,13 @@ S = SELECT, I = INSERT, U = UPDATE.
 | Table or view | Admin | PI | Grant Officer | Student |
 |---|:-:|:-:|:-:|:-:|
 | User, Department | ALL | | | |
-| Proposal | ALL | S I U | S, U(status) | |
+| Proposal | ALL | S I U D | S, U(status) | |
 | Grant_ | ALL | S | S I | |
 | Project | ALL | S | S I | |
 | BudgetHead | ALL | S | S I | |
 | Expense | ALL | S I | S U | |
 | Milestone | ALL | S I U | | |
-| ResearchOutput | ALL | S I | | |
+| ResearchOutput | ALL | S I U D | | |
 | Public_Project_View | ALL | S | S | S |
 | PI_Dashboard_View | ALL | S | | |
 | Admin_Analytics_View | ALL | | | |

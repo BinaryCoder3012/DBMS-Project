@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api.js";
 import { DB, initDB, logSQL, inr, fmtDate, fullName } from "../lib/db.js";
 import { Status, PageHead, Notice, Modal } from "../components/ui.jsx";
+import { DeleteButton } from "./Records.jsx";
 
 const LIFECYCLE = ["Draft", "Submitted", "Under Review", "Approved", "Rejected"];
 const EMPTY = { title: "", abstract: "", total_budget_requested: "", duration_months: "" };
@@ -38,6 +39,7 @@ export default function Proposals({ user }) {
   const [fresh, setFresh] = useState(null);
   const [award, setAward] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
   const canEdit = user.role === "PI" || user.role === "Admin";
   const isOffice = user.role === "Grant_Officer" || user.role === "Admin";
 
@@ -63,7 +65,46 @@ export default function Proposals({ user }) {
     }
   }
 
+  function openNew() { setEditing(null); setForm(EMPTY); setShowForm(true); }
+  function openEdit(p) {
+    setEditing(p.proposal_id);
+    setForm({ title: p.title, abstract: p.abstract || "", total_budget_requested: String(p.total_budget_requested), duration_months: String(p.duration_months) });
+    setShowForm(true);
+  }
+
+  function badForm() {
+    if (!form.title || !(Number(form.total_budget_requested) > 0) || !(Number(form.duration_months) > 0)) {
+      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "The title can't be empty, and budget and duration must be more than zero (chk_proposal_budget, chk_proposal_duration)." });
+      setShowForm(false); return true;
+    }
+    return false;
+  }
+
+  async function saveEdit() {
+    logSQL(`UPDATE Proposal SET title='${form.title}', abstract='...', total_budget_requested=${form.total_budget_requested}, duration_months=${form.duration_months}
+WHERE proposal_id=${editing} AND status='Draft';`, "Edit a draft");
+    const fields = { title: form.title, abstract: form.abstract, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months) };
+    const done = () => { setMsg({ tone: "good", title: "Draft updated.", text: form.title }); setShowForm(false); setFresh(editing); setEditing(null); setForm(EMPTY); };
+    if (DB.live) { if (await write(() => api.updateProposal(editing, fields))) done(); else setShowForm(false); return; }
+    if (badForm()) return;
+    Object.assign(DB.proposals.find(x => x.proposal_id === editing), fields);
+    setProposals([...DB.proposals]);
+    done();
+  }
+
+  async function remove(p) {
+    logSQL(`DELETE FROM Proposal WHERE proposal_id=${p.proposal_id} AND status='Draft';`, "Delete a draft");
+    if (DB.live) {
+      if (await write(() => api.deleteProposal(p.proposal_id))) setMsg({ tone: "", title: "Draft deleted.", text: p.title });
+      return;
+    }
+    DB.proposals.splice(DB.proposals.findIndex(x => x.proposal_id === p.proposal_id), 1);
+    setProposals([...DB.proposals]);
+    setMsg({ tone: "", title: "Draft deleted.", text: p.title });
+  }
+
   async function submit() {
+    if (editing) return saveEdit();
     logSQL(`INSERT INTO Proposal (title, abstract, total_budget_requested, duration_months, submission_date, status, eligibility_check_passed, pi_id)\nVALUES ('${form.title}', '...', ${form.total_budget_requested}, ${form.duration_months}, CURDATE(), 'Draft', TRUE, ${user.user_id});\n-- BEFORE INSERT: active_project_limit_pi`, "New proposal insert");
     const saved = () => {
       setMsg({ tone: "good", title: "Proposal saved as a draft.", text: "Submit it when it is ready for review." });
@@ -87,11 +128,8 @@ export default function Proposals({ user }) {
       setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "ERR-PI001: PI already has 5 active projects; cannot submit new proposal" });
       setShowForm(false); return;
     }
-    if (!form.title || !(Number(form.total_budget_requested) > 0) || !(Number(form.duration_months) > 0)) {
-      setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "The title can't be empty, and budget and duration must be more than zero (chk_proposal_budget, chk_proposal_duration)." });
-      setShowForm(false); return;
-    }
-    const np = { proposal_id: proposals.length + 1, ...form, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months), submission_date: new Date().toISOString().split("T")[0], status: "Draft", eligibility_check_passed: true, pi_id: user.user_id };
+    if (badForm()) return;
+    const np = { proposal_id: Math.max(0, ...DB.proposals.map(x => x.proposal_id)) + 1, ...form, total_budget_requested: Number(form.total_budget_requested), duration_months: Number(form.duration_months), submission_date: new Date().toISOString().split("T")[0], status: "Draft", eligibility_check_passed: true, pi_id: user.user_id };
     DB.proposals.push(np);
     setProposals([...DB.proposals]);
     setFresh(np.proposal_id);
@@ -114,10 +152,28 @@ export default function Proposals({ user }) {
   async function confirmAward() {
     const { proposal, heads, ...fields } = award;
     logSQL(`START TRANSACTION;\nSELECT status FROM Proposal WHERE proposal_id=${proposal.proposal_id} FOR UPDATE;\nINSERT INTO Grant_ (...) VALUES (...);\nINSERT INTO Project (...) VALUES (...);\nINSERT INTO BudgetHead (...) VALUES (...); -- one per category\nUPDATE Proposal SET status='Approved' WHERE proposal_id=${proposal.proposal_id};\nCOMMIT;`, "W1: multi-table award transaction");
-    const result = await write(() => api.awardGrant({
-      proposal_id: proposal.proposal_id, ...fields,
-      budget_heads: heads.filter(h => Number(h.allocated_amount) !== 0),
-    }));
+    const budget_heads = heads.filter(h => Number(h.allocated_amount) !== 0);
+    let result;
+    if (DB.live) {
+      result = await write(() => api.awardGrant({ proposal_id: proposal.proposal_id, ...fields, budget_heads }));
+    } else {
+      // Offline preview: the same four writes on the local copy.
+      const total = budget_heads.reduce((t, h) => t + Number(h.allocated_amount), 0);
+      if (!budget_heads.length || !(total > 0) || !(fields.end_date > fields.start_date)) {
+        setAward(null);
+        setMsg({ tone: "bad", title: "MySQL would refuse this.", text: "Budget heads must add up to more than zero and the end date must come after the start date (chk_grant_amount, chk_grant_dates)." });
+        return;
+      }
+      const next = (rows, key) => Math.max(0, ...rows.map(r => r[key])) + 1;
+      const grant_id = next(DB.grants, "grant_id"), project_id = next(DB.projects, "project_id");
+      const pi = DB.users.find(u => u.user_id === proposal.pi_id);
+      DB.grants.push({ grant_id, grant_title: proposal.title, total_amount_awarded: total, start_date: fields.start_date, end_date: fields.end_date, status: "Active", funding_agency: fields.funding_agency, agency_contact_info: fields.agency_contact_info, reporting_frequency: fields.reporting_frequency, proposal_id: proposal.proposal_id });
+      DB.projects.push({ project_id, project_title: proposal.title, description: proposal.abstract, start_date: fields.start_date, end_date: fields.end_date, status: "Active", current_balance: total, department_id: pi?.dept_id ?? null, grant_id, pi_id: proposal.pi_id });
+      budget_heads.forEach(h => DB.budget_heads.push({ budgethead_id: next(DB.budget_heads, "budgethead_id"), project_id, category: h.category, allocated_amount: Number(h.allocated_amount), spent_amount: 0, remaining_balance: Number(h.allocated_amount) }));
+      Object.assign(DB.proposals.find(x => x.proposal_id === proposal.proposal_id), { status: "Approved" });
+      setProposals([...DB.proposals]);
+      result = { total };
+    }
     setAward(null);
     if (result) setMsg({ tone: "good", title: `Grant awarded, ${inr(result.total)} in total.`, text: "The proposal, grant, project and budget heads were written in one committed transaction." });
   }
@@ -125,7 +181,7 @@ export default function Proposals({ user }) {
   return (
     <div>
       <PageHead title="Proposals" sub="Each proposal moves through five states, stored as an ENUM on Proposal.status.">
-        {canEdit && <button className="btn btn-ink" onClick={() => setShowForm(true)}>Write a proposal</button>}
+        {canEdit && <button className="btn btn-ink" onClick={openNew}>Write a proposal</button>}
       </PageHead>
 
       {msg && <Notice tone={msg.tone} title={msg.title} onClose={() => setMsg(null)}>{msg.text}</Notice>}
@@ -164,9 +220,11 @@ export default function Proposals({ user }) {
                   {p.eligibility_check_passed ? <span className="chip green">Eligible</span> : <span className="chip red">Not eligible</span>}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  {p.status === "Draft" && canEdit && <button className="btn btn-sm" disabled={busy} onClick={() => move(p, "Submitted")}>Submit for review</button>}
+                  {p.status === "Draft" && canEdit && <button className="btn btn-ink btn-sm" disabled={busy} onClick={() => move(p, "Submitted")}>Submit for review</button>}
+                  {p.status === "Draft" && canEdit && <button className="btn btn-sm" disabled={busy} onClick={() => openEdit(p)}>Edit</button>}
+                  {p.status === "Draft" && canEdit && <DeleteButton label="Delete draft" busy={busy} onDelete={() => remove(p)} />}
                   {p.status === "Submitted" && isOffice && <button className="btn btn-sm" disabled={busy} onClick={() => move(p, "Under Review")}>Start review</button>}
-                  {["Submitted", "Under Review"].includes(p.status) && isOffice && DB.live && <button className="btn btn-green btn-sm" disabled={busy} onClick={() => setAward(awardDraft(p))}>Award grant</button>}
+                  {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-green btn-sm" disabled={busy} onClick={() => setAward(awardDraft(p))}>Award grant</button>}
                   {["Submitted", "Under Review"].includes(p.status) && isOffice && <button className="btn btn-red btn-sm" disabled={busy} onClick={() => move(p, "Rejected")}>Reject</button>}
                 </div>
               </article>
@@ -177,7 +235,7 @@ export default function Proposals({ user }) {
       </section>
 
       {showForm && (
-        <Modal title="Write a proposal" onClose={() => setShowForm(false)}>
+        <Modal title={editing ? "Edit draft" : "Write a proposal"} onClose={() => setShowForm(false)}>
           <label className="field"><span>Title</span>
             <input className="input" autoFocus value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Smart grid optimisation with reinforcement learning" />
           </label>
@@ -197,7 +255,7 @@ export default function Proposals({ user }) {
           </div>
           <div className="modal-foot">
             <button className="btn" onClick={() => setShowForm(false)}>Cancel</button>
-            <button className="btn btn-ink" disabled={busy} onClick={submit}>Save draft</button>
+            <button className="btn btn-ink" disabled={busy} onClick={submit}>{editing ? "Save changes" : "Save draft"}</button>
           </div>
         </Modal>
       )}

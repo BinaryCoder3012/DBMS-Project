@@ -14,7 +14,7 @@
 ![Express](https://img.shields.io/badge/Express-4-1F5C45?style=flat-square&logo=express&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-1F5C45?style=flat-square&logo=react&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-1F5C45?style=flat-square&logo=vite&logoColor=white)
-![Tests](https://img.shields.io/badge/integration%20tests-32%20passing-1F5C45?style=flat-square)
+![Tests](https://img.shields.io/badge/integration%20tests-39%20passing-1F5C45?style=flat-square)
 ![Records](https://img.shields.io/badge/seed%20data-1%2C335%20records-1F5C45?style=flat-square)
 
 **CS F212 Database Systems · BITS Pilani, Hyderabad Campus · Group-25**
@@ -33,10 +33,9 @@
 > | | |
 > |---|---|
 > | **Final commit** | Git tag **`final`** (view it with `git checkout final`, or on GitHub under *Tags* &rarr; `final`) |
-> | **Last code commit** | `c046f0ca28484d201476f4d9a2e70ae2280cfe1f` |
 > | **Repository** | https://github.com/BinaryCoder3012/DBMS-Project |
 >
-> The `final` tag points to the commit that adds this section. That commit changes only this README, so the code, schema and line numbers are the same as in `c046f0c`. The design document and the demo sheet name the tagged commit.
+> The `final` tag points to the last commit on `main`. The design document and the demo sheet give its full hash, and every file path and line number in them refers to that commit.
 
 ---
 
@@ -57,7 +56,7 @@ A research grant passes through many hands, and the costly mistakes are always t
 |:-:|:-:|:-:|:-:|
 | **19** relations | **11** CHECK constraints | **24** foreign keys | **1,335** seed records |
 | **5** triggers | **4** views | **6** secondary indexes | **4** MySQL roles |
-| **2** stored procedures | **3** scheduled events | **6** analytical queries | **32** integration tests |
+| **2** stored procedures | **3** scheduled events | **6** analytical queries | **39** integration tests |
 
 ## Technology stack
 
@@ -199,6 +198,20 @@ FULLTEXT search matches researchers to topics and scores open funding calls into
 <td width="50%"><img src="docs/screenshots/dba-queries.jpg" alt="DBA console"/><br/><sub><b>W3.</b> Q1 to Q6 run live, and the console shows SQL straight from <code>schema/</code>.</sub></td>
 </tr>
 </table>
+
+## What each role can do
+
+Every action below is checked twice: the API's role guard, and the MySQL role GRANTs in [`04_rbac.sql`](schema/04_rbac.sql).
+
+| Screen | PI | Grant officer | Student | Admin |
+|---|---|---|---|---|
+| **Proposals** | Write a proposal, **Edit** and **Delete draft** (own Drafts only), **Submit for review** | **Start review**, **Award grant**, **Reject** | Hidden | All PI and officer actions on any proposal |
+| **Expenses** | **Log an expense** on own projects | **Approve**, **Reject** (also reverses an approval) | Hidden | All |
+| **Milestones** | **Add milestone**, **Mark complete**, **Mark delayed**, **Report submitted**, **Reopen** on own projects | Hidden | Read only | All, on any project |
+| **Research outputs** | **Add research output**, change status (Submitted, Accepted, Published), **Delete** on own projects | Hidden | Read only, own projects | All, on any project |
+| **People, Departments** | Hidden | Hidden | Hidden | **Add person** (password stored as `SHA2`), **Add department**, **Delete department** (people and projects kept through `ON DELETE SET NULL`) |
+
+Only a **Draft** can be edited or deleted. Once a proposal is submitted, it and everything that hangs off it (grant, project, budget heads, expenses) can only change status, so the money trail stays complete for auditing. Delete buttons ask for a second click to confirm.
 
 ## Database design
 
@@ -365,7 +378,7 @@ Everything the mid-semester report planned is in place.
 | React screens | ✅ Done for all four roles |
 | Queries Q1 to Q6, analytics, full-text matcher | ✅ Done |
 | Backup and recovery notes | ✅ Done, restore tested |
-| Integration testing | ✅ 32 tests on MySQL 8.0.46 |
+| Integration testing | ✅ 39 tests on MySQL 8.0.46 |
 
 <details>
 <summary><b>Build schedule</b></summary>

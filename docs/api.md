@@ -33,6 +33,8 @@ Rows are narrowed to what the role may see.
 |---|---|---|---|
 | POST | `/api/proposals` | PI, Admin | Create a Draft |
 | PATCH | `/api/proposals/:id/status` | PI, Officer, Admin | Move along the life cycle |
+| PATCH | `/api/proposals/:id` | PI (own), Admin | Edit a Draft; CHECK constraints still apply |
+| DELETE | `/api/proposals/:id` | PI (own), Admin | Delete a Draft; any other status is refused with 409 |
 | POST | `/api/grants/award` | Officer, Admin | Transaction over four tables |
 
 Proposal life cycle:
@@ -74,6 +76,19 @@ Award request:
 | POST | `/api/expenses` | PI, Admin | Pending expense, checked by the triggers |
 | PATCH | `/api/expenses/:id/approve` | Officer, Admin | Locked ACID approval |
 | PATCH | `/api/expenses/:id/reject` | Officer, Admin | Reject, or reverse an approval |
+
+## Project records and administration
+
+| Method | Path | Roles | Purpose |
+|---|---|---|---|
+| POST | `/api/milestones` | PI (own project), Admin | Add a Pending milestone |
+| PATCH | `/api/milestones/:id` | PI (own project), Admin | Set Completed (stamps `completion_date`), Delayed or Pending; record `report_submitted` |
+| POST | `/api/research-outputs` | PI (own project), Admin | Add a publication, patent, prototype or report |
+| PATCH | `/api/research-outputs/:id` | PI (own project), Admin | Move to Submitted, Accepted or Published |
+| DELETE | `/api/research-outputs/:id` | PI (own project), Admin | Remove an output recorded by mistake |
+| POST | `/api/users` | Admin | Add a person; password stored as `SHA2(password, 256)`, email UNIQUE |
+| POST | `/api/departments` | Admin | Add a department |
+| DELETE | `/api/departments/:id` | Admin | Delete a department; `ON DELETE SET NULL` keeps its people and projects |
 
 ## Workflow W3
 

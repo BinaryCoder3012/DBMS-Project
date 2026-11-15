@@ -41,11 +41,11 @@ GRANT CREATE USER ON *.* TO admin_role;
 --  Row-level filtering enforced at application layer (pi_id = current user).
 -- ════════════════════════════════════════════════════════════
 -- Proposals: full CRUD
-GRANT SELECT, INSERT, UPDATE ON unigrant.Proposal       TO pi_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON unigrant.Proposal       TO pi_role;  -- DELETE: own Drafts only (API)
 -- Expenses: can create, view own; cannot approve
 GRANT SELECT, INSERT         ON unigrant.Expense        TO pi_role;
 -- Research outputs: create and view
-GRANT SELECT, INSERT         ON unigrant.ResearchOutput TO pi_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON unigrant.ResearchOutput TO pi_role;
 -- Milestones: update completion status
 GRANT SELECT, INSERT, UPDATE ON unigrant.Milestone      TO pi_role;
 -- Projects: view only (creation managed by Admin/Grant linkage)

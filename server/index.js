@@ -58,6 +58,8 @@ function sendError(res, err) {
   if (err.code === "ER_NO_REFERENCED_ROW_2")         return res.status(400).json({ error: "A referenced row does not exist.", code: "FOREIGN_KEY" });
   if (err.code === "ER_ROW_IS_REFERENCED_2")         return res.status(409).json({ error: "Other rows still depend on this one.", code: "FOREIGN_KEY" });
   if (err.code === "ER_BAD_NULL_ERROR")              return res.status(400).json({ error: err.sqlMessage, code: "NOT_NULL" });
+  if (["WARN_DATA_TRUNCATED", "ER_TRUNCATED_WRONG_VALUE", "ER_DATA_TOO_LONG"].includes(err.code))
+                                                     return res.status(400).json({ error: err.sqlMessage, code: "BAD_VALUE" });
   console.error(err);
   res.status(500).json({ error: "Database error" });
 }
@@ -284,6 +286,141 @@ app.patch("/api/proposals/:id/status", auth, allow(...STAFF), route(async (req, 
     if (!roles.includes(req.user.role)) throw httpError(403, `The ${req.user.role} role cannot make this change.`);
     await conn.execute("UPDATE Proposal SET status = ? WHERE proposal_id = ?", [status, req.params.id]);
   });
+  res.json({ success: true });
+}));
+
+// Locks a Draft proposal the caller may change: its own PI, or an Admin.
+async function ownDraft(conn, id, user) {
+  const [[proposal]] = await conn.execute(
+    "SELECT status, pi_id FROM Proposal WHERE proposal_id = ? FOR UPDATE", [id]);
+  if (!proposal) throw httpError(404, "Proposal not found");
+  if (user.role === "PI" && proposal.pi_id !== user.user_id) throw httpError(403, "This is not your proposal.");
+  if (proposal.status !== "Draft") throw httpError(409, `A ${proposal.status} proposal can no longer be changed.`);
+  return proposal;
+}
+
+// PATCH /api/proposals/:id — edit a Draft. The CHECK constraints still apply.
+app.patch("/api/proposals/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { title, abstract, total_budget_requested, duration_months } = req.body;
+  await transaction(async conn => {
+    await ownDraft(conn, req.params.id, req.user);
+    await conn.execute(
+      `UPDATE Proposal SET title = ?, abstract = ?, total_budget_requested = ?, duration_months = ?
+       WHERE proposal_id = ?`,
+      [title ?? null, abstract || "", total_budget_requested ?? null, duration_months ?? null, req.params.id]);
+  });
+  res.json({ success: true });
+}));
+
+// DELETE /api/proposals/:id — only a Draft, which no grant can point at yet.
+app.delete("/api/proposals/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  await transaction(async conn => {
+    await ownDraft(conn, req.params.id, req.user);
+    await conn.execute("DELETE FROM Proposal WHERE proposal_id = ?", [req.params.id]);
+  });
+  res.json({ success: true });
+}));
+
+// ── Project records: milestones and research outputs ──────────────────────────
+// A PI may add to or change records only on projects they lead; an Admin on any.
+async function ownProject(conn, projectId, user) {
+  const [[project]] = await conn.execute(
+    "SELECT pi_id FROM Project WHERE project_id = ?", [projectId ?? null]);
+  if (!project) throw httpError(404, "Project not found");
+  if (user.role === "PI" && project.pi_id !== user.user_id) throw httpError(403, "This is not your project.");
+}
+
+async function recordProject(conn, table, key, id) {
+  const [[row]] = await conn.execute(`SELECT project_id FROM ${table} WHERE ${key} = ?`, [id]);
+  if (!row) throw httpError(404, `${table === "Milestone" ? "Milestone" : "Research output"} not found`);
+  return row.project_id;
+}
+
+// POST /api/milestones
+app.post("/api/milestones", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { project_id, title, due_date, deliverable_description, priority } = req.body;
+  await ownProject(pool, project_id, req.user);
+  const [result] = await pool.execute(
+    `INSERT INTO Milestone (project_id, title, due_date, deliverable_description, priority, status)
+     VALUES (?, ?, ?, ?, ?, 'Pending')`,
+    [project_id, title ?? null, due_date || null, deliverable_description || "", priority || "Medium"]);
+  res.status(201).json({ milestone_id: result.insertId });
+}));
+
+// PATCH /api/milestones/:id — mark Completed (stamps completion_date), Delayed or
+// Pending, and record whether the report was submitted.
+app.patch("/api/milestones/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { status, report_submitted } = req.body;
+  if (status !== undefined && !["Pending", "Completed", "Delayed"].includes(status)) throw httpError(400, "Unknown milestone status.");
+  await ownProject(pool, await recordProject(pool, "Milestone", "milestone_id", req.params.id), req.user);
+  if (status !== undefined) {
+    await pool.execute(
+      `UPDATE Milestone SET status = ?, completion_date = IF(? = 'Completed', CURDATE(), NULL)
+       WHERE milestone_id = ?`, [status, status, req.params.id]);
+  }
+  if (report_submitted !== undefined) {
+    await pool.execute("UPDATE Milestone SET report_submitted = ? WHERE milestone_id = ?", [!!report_submitted, req.params.id]);
+  }
+  res.json({ success: true });
+}));
+
+// POST /api/research-outputs
+app.post("/api/research-outputs", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { project_id, type, title, authors, publication_date, journal_conference, doi, status } = req.body;
+  await ownProject(pool, project_id, req.user);
+  const [result] = await pool.execute(
+    `INSERT INTO ResearchOutput
+       (project_id, type, title, authors, publication_date, journal_conference, doi, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [project_id, type ?? null, title ?? null, authors || "", publication_date || null,
+     journal_conference || "", doi || "", status || "Submitted"]);
+  res.status(201).json({ output_id: result.insertId });
+}));
+
+// PATCH /api/research-outputs/:id — move an output to Accepted or Published
+app.patch("/api/research-outputs/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  const { status } = req.body;
+  if (!["Submitted", "Accepted", "Published"].includes(status)) throw httpError(400, "Unknown output status.");
+  await ownProject(pool, await recordProject(pool, "ResearchOutput", "output_id", req.params.id), req.user);
+  await pool.execute("UPDATE ResearchOutput SET status = ? WHERE output_id = ?", [status, req.params.id]);
+  res.json({ success: true });
+}));
+
+// DELETE /api/research-outputs/:id — remove an output recorded by mistake
+app.delete("/api/research-outputs/:id", auth, allow("PI", "Admin"), route(async (req, res) => {
+  await ownProject(pool, await recordProject(pool, "ResearchOutput", "output_id", req.params.id), req.user);
+  await pool.execute("DELETE FROM ResearchOutput WHERE output_id = ?", [req.params.id]);
+  res.json({ success: true });
+}));
+
+// ── Admin: people and departments ─────────────────────────────────────────────
+
+// POST /api/users — the password is stored as SHA2(password, 256), like the seed.
+app.post("/api/users", auth, allow("Admin"), route(async (req, res) => {
+  const { first_name, last_name, email, password, role, dept_id, specialization, phone } = req.body;
+  if (!password) throw httpError(400, "A password is required.");
+  if (!["Admin", "PI", "Student", "Grant_Officer"].includes(role)) throw httpError(400, "Unknown role.");
+  const [result] = await pool.execute(
+    `INSERT INTO User (first_name, last_name, email, password_hash, role, dept_id, specialization, phone, hire_date)
+     VALUES (?, ?, ?, SHA2(?, 256), ?, ?, ?, ?, CURDATE())`,
+    [first_name ?? null, last_name ?? null, email ?? null, String(password), role,
+     dept_id || null, specialization || null, phone || null]);
+  res.status(201).json({ user_id: result.insertId });
+}));
+
+// POST /api/departments
+app.post("/api/departments", auth, allow("Admin"), route(async (req, res) => {
+  const { dept_name, location, annual_budget, established_date } = req.body;
+  const [result] = await pool.execute(
+    `INSERT INTO Department (dept_name, location, annual_budget, established_date) VALUES (?, ?, ?, ?)`,
+    [dept_name ?? null, location || null, Number(annual_budget) || 0, established_date || null]);
+  res.status(201).json({ dept_id: result.insertId });
+}));
+
+// DELETE /api/departments/:id — ON DELETE SET NULL keeps its people and projects.
+app.delete("/api/departments/:id", auth, allow("Admin"), route(async (req, res) => {
+  const [result] = await pool.execute("DELETE FROM Department WHERE dept_id = ?", [req.params.id]);
+  if (!result.affectedRows) throw httpError(404, "Department not found");
   res.json({ success: true });
 }));
 

@@ -12,6 +12,8 @@ export const NAV = {
     { id: "proposals", label: "Proposals" },
     { id: "grants", label: "Grants" },
     { id: "projects", label: "Projects" },
+    { id: "milestones", label: "Milestones" },
+    { id: "outputs", label: "Research outputs" },
     { id: "expenses", label: "Expenses" },
     { id: "users", label: "People" },
     { id: "departments", label: "Departments" },
@@ -66,7 +68,7 @@ export const ROLES = {
 
 export const DEMO_ACCOUNTS = [
   { email: "priya@university.edu",  pass: "admin123",   role: "Admin",         name: "Priya Sharma",  can: "Everything, including the DBA console" },
-  { email: "arjun@university.edu",  pass: "pi123",      role: "PI",            name: "Prof. Arjun Mehta", can: "Write proposals, log expenses" },
-  { email: "sneha@university.edu",  pass: "go123",      role: "Grant_Officer", name: "Sneha Patel",   can: "Approve or reject expenses" },
+  { email: "arjun@university.edu",  pass: "pi123",      role: "PI",            name: "Prof. Arjun Mehta", can: "Write, edit and submit proposals; log expenses; add milestones and outputs" },
+  { email: "sneha@university.edu",  pass: "go123",      role: "Grant_Officer", name: "Sneha Patel",   can: "Review and award proposals; approve or reject expenses" },
   { email: "rahul@university.edu",  pass: "student123", role: "Student",       name: "Rahul Verma",   can: "Read assigned projects through a view" },
 ];

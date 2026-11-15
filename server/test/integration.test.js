@@ -397,3 +397,103 @@ test("W3: the department report runs the stored procedure", async () => {
   assert.equal(body.dept_name, "Electrical Engineering");
   assert.equal((await http("GET", "/reports/department/999", "admin")).status, 422);
 });
+
+// ── Drafts, project records, people and departments ─────────────
+// Earlier tests give the seeded PI five active projects, so the draft is inserted
+// for the admin (no projects) and then handed over; only INSERT runs the cap.
+async function draftFor(piId) {
+  const [row] = await db.execute(
+    `INSERT INTO Proposal (title, abstract, total_budget_requested, duration_months, status, pi_id)
+     VALUES ('Draft under test', '', 100000, 12, 'Draft', 1)`);
+  await db.execute("UPDATE Proposal SET pi_id = ? WHERE proposal_id = ?", [piId, row.insertId]);
+  return row.insertId;
+}
+
+test("a PI can edit and delete their own Draft, and nobody else's", async () => {
+  const mine = await draftFor(2), theirs = await draftFor(3);
+  assert.equal((await http("PATCH", `/proposals/${mine}`, "pi",
+    { title: "Edited draft", abstract: "x", total_budget_requested: 200000, duration_months: 18 })).status, 200);
+  const [[row]] = await db.execute("SELECT title, total_budget_requested FROM Proposal WHERE proposal_id = ?", [mine]);
+  assert.equal(row.title, "Edited draft");
+  assert.equal(row.total_budget_requested, 200000);
+  assert.equal((await http("DELETE", `/proposals/${theirs}`, "pi")).status, 403);
+  assert.equal((await http("DELETE", `/proposals/${mine}`, "officer")).status, 403);
+  assert.equal((await http("DELETE", `/proposals/${mine}`, "student")).status, 403);
+  assert.equal((await http("DELETE", `/proposals/${mine}`, "pi")).status, 200);
+  const [gone] = await db.execute("SELECT 1 FROM Proposal WHERE proposal_id = ?", [mine]);
+  assert.equal(gone.length, 0);
+});
+
+test("a submitted proposal can no longer be edited or deleted", async () => {
+  const id = await draftFor(2);
+  assert.equal((await http("PATCH", `/proposals/${id}/status`, "pi", { status: "Submitted" })).status, 200);
+  assert.equal((await http("DELETE", `/proposals/${id}`, "pi")).status, 409);
+  assert.equal((await http("PATCH", `/proposals/${id}`, "pi",
+    { title: "Late edit", total_budget_requested: 1, duration_months: 1 })).status, 409);
+  assert.equal((await http("PATCH", `/proposals/${id}`, "admin",
+    { title: "", total_budget_requested: 1, duration_months: 1 })).status, 409);
+});
+
+test("editing a Draft still obeys the CHECK constraints", async () => {
+  const id = await draftFor(2);
+  const { status, body } = await http("PATCH", `/proposals/${id}`, "pi",
+    { title: "Bad", total_budget_requested: -5, duration_months: 12 });
+  assert.equal(status, 422);
+  assert.match(body.error, /chk_proposal_budget/);
+});
+
+test("a PI adds and completes milestones only on their own projects", async () => {
+  const { project_id } = await freshHead();
+  const add = await http("POST", "/milestones", "pi", { project_id, title: "Prototype", due_date: "2027-01-31", priority: "High" });
+  assert.equal(add.status, 201);
+  const id = add.body.milestone_id;
+  assert.equal((await http("PATCH", `/milestones/${id}`, "pi", { status: "Completed" })).status, 200);
+  assert.equal((await http("PATCH", `/milestones/${id}`, "pi", { report_submitted: true })).status, 200);
+  const [[m]] = await db.execute("SELECT status, completion_date, report_submitted FROM Milestone WHERE milestone_id = ?", [id]);
+  assert.equal(m.status, "Completed");
+  assert.ok(m.completion_date);
+  assert.equal(m.report_submitted, 1);
+  const [[other]] = await db.query("SELECT project_id FROM Project WHERE pi_id <> 2 LIMIT 1");
+  assert.equal((await http("POST", "/milestones", "pi", { project_id: other.project_id, title: "x", due_date: "2027-01-01" })).status, 403);
+  assert.equal((await http("PATCH", `/milestones/${id}`, "student", { status: "Pending" })).status, 403);
+  assert.equal((await http("PATCH", `/milestones/${id}`, "pi", { status: "Done" })).status, 400);
+});
+
+test("research outputs can be added, moved along and deleted by their PI", async () => {
+  const { project_id } = await freshHead();
+  const add = await http("POST", "/research-outputs", "pi",
+    { project_id, type: "Publication", title: "Test paper", authors: "Mehta A." });
+  assert.equal(add.status, 201);
+  const id = add.body.output_id;
+  assert.equal((await http("PATCH", `/research-outputs/${id}`, "pi", { status: "Published" })).status, 200);
+  const [[o]] = await db.execute("SELECT status FROM ResearchOutput WHERE output_id = ?", [id]);
+  assert.equal(o.status, "Published");
+  assert.equal((await http("POST", "/research-outputs", "pi", { project_id, type: "Poem", title: "x" })).status, 400);
+  assert.equal((await http("DELETE", `/research-outputs/${id}`, "officer")).status, 403);
+  assert.equal((await http("DELETE", `/research-outputs/${id}`, "pi")).status, 200);
+});
+
+test("only the admin adds people and departments; a new user can sign in", async () => {
+  const dept = await http("POST", "/departments", "admin", { dept_name: "Test Dept", location: "Block Z", annual_budget: 100 });
+  assert.equal(dept.status, 201);
+  const person = { first_name: "New", last_name: "Person", email: "new.person@university.edu",
+                   password: "newpass1", role: "Student", dept_id: dept.body.dept_id };
+  assert.equal((await http("POST", "/users", "pi", person)).status, 403);
+  assert.equal((await http("POST", "/users", "admin", person)).status, 201);
+  assert.equal((await http("POST", "/users", "admin", person)).status, 409);
+  const login = await http("POST", "/auth/login", null, { email: person.email, password: "newpass1" });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.role, "Student");
+  assert.equal((await http("POST", "/departments", "officer", { dept_name: "x" })).status, 403);
+});
+
+test("deleting a department keeps its people (ON DELETE SET NULL)", async () => {
+  const { body } = await http("POST", "/departments", "admin", { dept_name: "Short-lived" });
+  const [u] = await db.execute(
+    `INSERT INTO User (first_name, last_name, email, password_hash, role, dept_id)
+     VALUES ('Kept', 'User', 'kept.user@university.edu', SHA2('x',256), 'PI', ?)`, [body.dept_id]);
+  assert.equal((await http("DELETE", `/departments/${body.dept_id}`, "admin")).status, 200);
+  const [[row]] = await db.execute("SELECT dept_id FROM User WHERE user_id = ?", [u.insertId]);
+  assert.equal(row.dept_id, null);
+  assert.equal((await http("DELETE", `/departments/${body.dept_id}`, "admin")).status, 404);
+});
